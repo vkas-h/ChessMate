@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ChessMate</string>
+    <string name="title_activity_main">ChessMate</string>
+    <string name="package_name">com.vkas.chessmate</string>
+    <string name="custom_url_scheme">com.vkas.chessmate</string>
+</resources>

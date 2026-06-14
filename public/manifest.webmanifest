@@ -1,0 +1,22 @@
+{
+    "name": "ChessMate — Game Analysis",
+    "short_name": "ChessMate",
+    "description": "Free chess game analysis with move classifications, fully on-device.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#16141f",
+    "theme_color": "#16141f",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

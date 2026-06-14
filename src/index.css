@@ -1,0 +1,177 @@
+/* ================= ChessMate "Tournament Hall" design system =====
+ * Tonal elevation (no border-soup): higher surface = lighter bg.
+ * One accent (amber/gold), used ONLY for: active states, current
+ * move, primary CTA. Classification colours are functional and
+ * keep their own semantics.
+ * Spacing rhythm: multiples of 4. Radius scale: 8 / 12 / 16.
+ * Type scale: 12 / 14 / 16 / 20 / 24.
+ * ================================================================ */
+
+:root {
+    /* surfaces (tonal elevation) */
+    --bg: #101014;
+    --surface-1: #17171d;       /* cards, panels */
+    --surface-2: #1f1f27;       /* nested / hover / inputs */
+    --surface-3: #282832;       /* overlays, pressed */
+
+    /* hairlines - barely-there, elevation does the real work */
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.13);
+
+    /* text */
+    --text: #ededf0;
+    --text-dim: #a4a3ae;
+    --text-faint: #6e6d78;
+
+    /* the ONE accent: tournament gold */
+    --accent: #d4a843;
+    --accent-strong: #e6bc55;
+    --accent-soft: rgba(212, 168, 67, 0.14);
+    --accent-text: #16130a;
+
+    /* functional */
+    --good: #98bc49;
+    --bad: #c93230;
+
+    /* board */
+    --board-light: #f0d9b5;
+    --board-dark: #b58863;
+
+    /* radius scale */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+
+    --nav-height: 60px;
+
+    /* motion */
+    --ease: cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Nunito", "Segoe UI", system-ui, -apple-system, sans-serif;
+    height: 100%;
+    overscroll-behavior: none;
+    font-size: 16px;
+    line-height: 1.45;
+}
+
+#root {
+    height: 100%;
+}
+
+button {
+    font-family: inherit;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    background: none;
+    transition:
+        background 0.16s var(--ease),
+        color 0.16s var(--ease),
+        border-color 0.16s var(--ease),
+        transform 0.1s var(--ease),
+        opacity 0.16s var(--ease);
+}
+
+button:active {
+    transform: scale(0.97);
+}
+
+input, textarea, select {
+    font-family: inherit;
+    transition: border-color 0.16s var(--ease);
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent) !important;
+}
+
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: 3px;
+}
+
+/* ---------- shared primitives ---------- */
+
+.card {
+    background: var(--surface-1);
+    border-radius: var(--r-md);
+}
+
+.screen-fade {
+    animation: screenFade 0.22s var(--ease);
+}
+
+@keyframes screenFade {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes badgePop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    70%  { transform: scale(1.15); }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes shimmer {
+    0%   { background-position: -200px 0; }
+    100% { background-position: 200px 0; }
+}
+
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--surface-2) 25%,
+        var(--surface-3) 50%,
+        var(--surface-2) 75%
+    );
+    background-size: 400px 100%;
+    animation: shimmer 1.2s infinite linear;
+    border-radius: var(--r-sm);
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+/* ---------- splash ---------- */
+
+@keyframes splashTile {
+    from { opacity: 0; transform: scale(0.82); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes splashRise {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes splashFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ---------- native (Capacitor) safe areas ---------- */
+
+/* Status bar clearance: use the inset when reported, with a sane
+   Android fallback so content never collides with the clock. */
+.native-app .app-scroll {
+    padding-top: max(env(safe-area-inset-top), 32px);
+}
