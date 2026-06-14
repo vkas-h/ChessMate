@@ -78,6 +78,32 @@ npm run android:open   # opens Android Studio — build & run from there
 
 For iOS, replace the `android` commands with `ios` (requires Xcode on macOS).
 
+### 📲 Installing the APK (sideload)
+
+Download the latest `ChessMate-vX.X.X.apk` from the [Releases](https://github.com/vkas-h/ChessMate/releases) page and install it directly on your Android device.
+
+> [!IMPORTANT]
+> Because ChessMate is not distributed via the Google Play Store, Android will block the install by default.
+> You need to allow installation from unknown sources **once** before installing.
+
+**Step-by-step:**
+
+1. Transfer the `.apk` to your phone (USB, Google Drive, WhatsApp, etc.)
+2. Tap the file to begin installation
+3. If prompted **"Install unknown apps"** → tap **Settings** → enable **Allow from this source**
+4. Go back and tap **Install**
+
+**Samsung devices (One UI) — Auto Blocker:**
+Samsung phones running One UI 6+ have an extra **Auto Blocker** feature that must be turned off:
+
+> **Settings → Security & Privacy → Auto Blocker → toggle OFF**
+
+Then retry the install. You can turn Auto Blocker back on afterwards.
+
+**Google Play Protect warning:**
+If Play Protect flags the app, tap **"Install anyway"** — the app contains no malware.
+ChessMate is fully open-source; you can audit every line of code in this repo.
+
 ---
 
 ## 🗂️ Project Structure
