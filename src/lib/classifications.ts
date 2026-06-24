@@ -1,17 +1,20 @@
 import { Classification } from "@/constants/Classification";
 
+/* Refreshed to crisp iOS-style hues that harmonise with the new
+   blue accent while staying distinguishable + matching the badge
+   PNGs. Greens align to the iOS green used for WIN. */
 export const classificationColours: Record<Classification, string> = {
-    [Classification.BRILLIANT]: "#1baaa6",
-    [Classification.CRITICAL]: "#5b8baf",
-    [Classification.BEST]: "#98bc49",
-    [Classification.EXCELLENT]: "#98bc49",
-    [Classification.OKAY]: "#97af8b",
-    [Classification.INACCURACY]: "#f4bf44",
-    [Classification.MISTAKE]: "#e28c28",
-    [Classification.BLUNDER]: "#c93230",
-    [Classification.FORCED]: "#97af8b",
-    [Classification.THEORY]: "#a88764",
-    [Classification.RISKY]: "#8983ac"
+    [Classification.BRILLIANT]: "#1ac8c0",
+    [Classification.CRITICAL]: "#5aa0e6",
+    [Classification.BEST]: "#34c759",
+    [Classification.EXCELLENT]: "#34c759",
+    [Classification.OKAY]: "#8ab48a",
+    [Classification.INACCURACY]: "#ffcc00",
+    [Classification.MISTAKE]: "#ff9f0a",
+    [Classification.BLUNDER]: "#ff453a",
+    [Classification.FORCED]: "#8ab48a",
+    [Classification.THEORY]: "#b08968",
+    [Classification.RISKY]: "#9b8cff"
 };
 
 export const classificationNames: Record<Classification, string> = {

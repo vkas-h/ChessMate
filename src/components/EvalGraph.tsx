@@ -5,14 +5,13 @@ import {
 } from "@/types/game/position/StateTreeNode";
 import { getTopEngineLine } from "@/types/game/position/EngineLine";
 import { Classification } from "@/constants/Classification";
-import PieceColour from "@/constants/PieceColour";
+import { winShareFromEvaluation } from "@/lib/utils/winProbability";
 
 import { useAppStore, getMainlineChain } from "../store";
 import { classificationColours } from "../lib/classifications";
 
-const HEIGHT = 110;
-const PAD_X = 6;
-const PAD_Y = 8;
+const PAD_X = 0;
+const PAD_Y = 6;
 
 /** Classifications worth marking with a dot on the graph. */
 const dottedClassifications: Classification[] = [
@@ -26,24 +25,24 @@ function getWhiteShare(node: StateTreeNode): number {
     const topLine = getTopEngineLine(node.state.engineLines);
     if (!topLine) return 0.5;
 
-    const evaluation = topLine.evaluation;
-
-    if (evaluation.type == "mate") {
-        if (evaluation.value > 0) return 1;
-        if (evaluation.value < 0) return 0;
-
-        return node.state.moveColour == PieceColour.WHITE ? 1 : 0;
-    }
-
-    return 1 / (1 + Math.exp(-0.004 * evaluation.value));
+    // Shared win-probability model (matches EvalBar + accuracy).
+    return winShareFromEvaluation(topLine.evaluation, node.state.moveColour);
 }
 
 /**
  * Whole-game evaluation graph (white advantage area chart) with
- * classification dots; tap or drag to jump to a move. Drawn in true
- * pixel coordinates (measured container width) so nothing distorts.
+ * classification dots; tap or drag to jump to a move. Now shades white
+ * advantage above the midline and black advantage below for instant
+ * readability, and (on the report) jumping a move can return to the
+ * board via `onJump`.
  */
-function EvalGraph() {
+function EvalGraph(props: {
+    height?: number;
+    /** Called after navigating to a node (e.g. to return to the board). */
+    onJump?: () => void;
+}) {
+    const HEIGHT = props.height ?? 120;
+
     const game = useAppStore(state => state.game);
     const currentNode = useAppStore(state => state.currentNode);
     const goToNode = useAppStore(state => state.goToNode);
@@ -80,21 +79,26 @@ function EvalGraph() {
     const innerW = Math.max(0, width - PAD_X * 2);
     const innerH = HEIGHT - PAD_Y * 2;
     const stepX = innerW / (mainline.length - 1);
+    const midY = PAD_Y + innerH / 2;
 
     const xAt = (index: number) => PAD_X + index * stepX;
     const yAt = (share: number) => PAD_Y + (1 - share) * innerH;
 
-    // Smooth-ish area path for white advantage
-    let path = "";
+    // White advantage = area between the curve and the bottom.
+    let whitePath = "";
+    let linePath = "";
 
     if (width > 0) {
-        path = `M ${PAD_X} ${HEIGHT - PAD_Y}`;
+        whitePath = `M ${PAD_X} ${HEIGHT - PAD_Y}`;
+        shares.forEach((share, index) => {
+            whitePath += ` L ${xAt(index).toFixed(1)} ${yAt(share).toFixed(1)}`;
+        });
+        whitePath += ` L ${(PAD_X + innerW).toFixed(1)} ${HEIGHT - PAD_Y} Z`;
 
         shares.forEach((share, index) => {
-            path += ` L ${xAt(index).toFixed(1)} ${yAt(share).toFixed(1)}`;
+            linePath += `${index == 0 ? "M" : "L"} `
+                + `${xAt(index).toFixed(1)} ${yAt(share).toFixed(1)} `;
         });
-
-        path += ` L ${(PAD_X + innerW).toFixed(1)} ${HEIGHT - PAD_Y} Z`;
     }
 
     const currentIndex = mainline.indexOf(currentNode);
@@ -112,16 +116,19 @@ function EvalGraph() {
             Math.max(0, Math.min(index, mainline.length - 1))
         ];
 
-        if (target && target != currentNode) goToNode(target, true);
+        if (target && target != currentNode) {
+            goToNode(target, true);
+            props.onJump?.();
+        }
     }
 
     return <div
         ref={wrapperRef}
         style={{
-            marginTop: 12,
             borderRadius: "var(--r-md)",
             overflow: "hidden",
-            background: "var(--surface-1)"
+            background: "var(--surface-2)",
+            border: "1px solid var(--line)"
         }}
     >
         {width > 0 && <svg
@@ -140,17 +147,28 @@ function EvalGraph() {
                 if (event.buttons > 0) jumpToEvent(event.clientX);
             }}
         >
-            {/* White advantage area */}
-            <path d={path} fill="#ecebee" />
+            {/* Black advantage fills the whole background (below curve
+                shows through), white advantage drawn on top. */}
+            <rect x={0} y={0} width={width} height={HEIGHT} fill="#0e0e0f" />
+
+            <path d={whitePath} fill="#f5f5f7" />
+
+            {/* outline of the eval line for crispness */}
+            <path
+                d={linePath}
+                fill="none"
+                stroke="rgba(0,0,0,0.25)"
+                strokeWidth={1}
+            />
 
             {/* 50% midline */}
             <line
-                x1={PAD_X} y1={HEIGHT / 2}
-                x2={width - PAD_X} y2={HEIGHT / 2}
-                stroke="var(--text-faint)"
+                x1={PAD_X} y1={midY}
+                x2={width - PAD_X} y2={midY}
+                stroke="var(--accent)"
                 strokeWidth={1}
                 strokeDasharray="3 4"
-                opacity={0.55}
+                opacity={0.5}
             />
 
             {/* Classification dots */}
@@ -168,7 +186,7 @@ function EvalGraph() {
                     cy={yAt(shares[index])}
                     r={4}
                     fill={classificationColours[classif]}
-                    stroke="#101014"
+                    stroke="#0e0e0f"
                     strokeWidth={1.5}
                 />;
             })}
@@ -187,7 +205,7 @@ function EvalGraph() {
                     cy={yAt(shares[currentIndex])}
                     r={5}
                     fill="var(--accent)"
-                    stroke="#101014"
+                    stroke="#0e0e0f"
                     strokeWidth={1.5}
                 />
             </>}

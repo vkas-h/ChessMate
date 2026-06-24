@@ -1,19 +1,33 @@
-import EngineVersion from "@/constants/EngineVersion";
 import { getNodeChain, StateTreeNode } from "@/types/game/position/StateTreeNode";
 import { getGameAnalysis } from "@/lib/reporter/report";
 import { getGameAccuracy } from "@/lib/reporter/accuracy";
 import AnalysedGame from "@/types/game/AnalysedGame";
 
-import Engine from "./Engine";
-import getCloudEvaluation from "./cloudEvaluate";
+import { enginePool } from "./enginePool";
+import { getCloudEvaluationsBatch } from "./cloudEvaluate";
 import { getStrictGameAccuracy } from "./accuracy";
+import {
+    hydrateEvalCache,
+    getCachedLines,
+    putCachedLines
+} from "./evalCache";
 
 export interface AnalysisProgress {
     /** 0 to 1 */
     progress: number;
-    stage: "evaluating" | "classifying" | "done";
+    stage: "preparing" | "evaluating" | "classifying" | "done";
     /** how many positions were served by Lichess cloud (deep) evals */
     cloudHits: number;
+    /** how many positions were served from the local eval cache */
+    cacheHits: number;
+}
+
+export interface AnalysisResult {
+    accuracies: { white: number; black: number };
+    cloudHits: number;
+    cacheHits: number;
+    /** whether every evaluated position reached the target depth */
+    consistentDepth: boolean;
 }
 
 interface AnalyseOptions {
@@ -30,14 +44,18 @@ interface AnalyseOptions {
  * Evaluates every mainline position of the game, then runs the
  * WintrChess reporter to classify moves and compute accuracies.
  *
- * For each position we first try the Lichess cloud database (very deep
- * evals, usually depth 30+), and fall back to local Stockfish if the
- * position is unknown or the request fails. Mutates the state tree.
+ * Pipeline (in order of cost):
+ *   1. local eval cache (instant, free)        — evalCache.ts
+ *   2. Lichess cloud DB, fetched IN PARALLEL    — cloudEvaluate batch
+ *   3. local Stockfish, depth-bounded for a     — enginePool (shared)
+ *      consistent depth across the whole game
+ *
+ * Mutates the state tree.
  */
 export async function analyseGame(
     game: AnalysedGame,
     options?: AnalyseOptions
-) {
+): Promise<AnalysisResult> {
     const {
         depth = 16,
         timeLimit = 5000,
@@ -46,65 +64,100 @@ export async function analyseGame(
         signal
     } = options || {};
 
+    await hydrateEvalCache();
+
     const nodes = getNodeChain(game.stateTree);
 
-    const engine = new Engine(EngineVersion.STOCKFISH_17_LITE);
-    engine.setLineCount(2);
-
     let cloudHits = 0;
-    // Stop hammering the cloud API after repeated misses
-    // (positions out of book are rarely in the cloud DB either)
-    let cloudMissStreak = 0;
-    const CLOUD_MISS_LIMIT = 5;
+    let cacheHits = 0;
+    let consistentDepth = true;
 
-    try {
-        for (let i = 0; i < nodes.length; i++) {
-            if (signal?.aborted) throw new Error("aborted");
+    onProgress?.({
+        progress: 0, stage: "preparing", cloudHits, cacheHits
+    });
 
-            const node = nodes[i];
+    // ---- Pass 0: serve from the persistent cache ------------------
+    const pending: StateTreeNode[] = [];
 
-            // Skip if we already have lines at sufficient depth
-            const existingDepth = Math.max(
-                0, ...node.state.engineLines.map(line => line.depth)
-            );
+    for (const node of nodes) {
+        const existingDepth = Math.max(
+            0, ...node.state.engineLines.map(line => line.depth)
+        );
+        if (existingDepth >= depth) continue;
 
-            if (existingDepth < depth) {
-                let evaluated = false;
-
-                if (useCloud && cloudMissStreak < CLOUD_MISS_LIMIT) {
-                    try {
-                        const cloudLines = await getCloudEvaluation(
-                            node.state.fen, 2
-                        );
-
-                        node.state.engineLines.push(...cloudLines);
-                        cloudHits++;
-                        cloudMissStreak = 0;
-                        evaluated = true;
-                    } catch {
-                        cloudMissStreak++;
-                    }
-                }
-
-                if (!evaluated) {
-                    engine.setPosition(node.state.fen);
-
-                    const lines = await engine.evaluate({ depth, timeLimit });
-                    node.state.engineLines.push(...lines);
-                }
-            }
-
-            onProgress?.({
-                progress: (i + 1) / nodes.length,
-                stage: "evaluating",
-                cloudHits
-            });
+        const cached = getCachedLines(node.state.fen, depth);
+        if (cached) {
+            node.state.engineLines.push(...cached);
+            cacheHits++;
+        } else {
+            pending.push(node);
         }
-    } finally {
-        engine.terminate();
     }
 
-    onProgress?.({ progress: 1, stage: "classifying", cloudHits });
+    if (signal?.aborted) throw new Error("aborted");
+
+    // ---- Pass 1: PARALLEL cloud prefetch for the misses -----------
+    if (useCloud && pending.length > 0) {
+        const cloudMap = await getCloudEvaluationsBatch(
+            pending.map(node => node.state.fen), 2
+        );
+
+        for (let i = pending.length - 1; i >= 0; i--) {
+            const node = pending[i];
+            const lines = cloudMap.get(node.state.fen);
+            if (lines) {
+                node.state.engineLines.push(...lines);
+                putCachedLines(node.state.fen, lines);
+                cloudHits++;
+                pending.splice(i, 1);
+            }
+        }
+    }
+
+    if (signal?.aborted) throw new Error("aborted");
+
+    // ---- Pass 2: local Stockfish for whatever is still missing ----
+    // Bulk pass uses MultiPV 1 (classification only needs the best line
+    // + the played move's eval); the engine-lines panel fetches the 2nd
+    // line lazily. Depth-bounded so every position reaches `depth`.
+    if (pending.length > 0) {
+        const engine = enginePool.acquire(1);
+        let done = nodes.length - pending.length;
+
+        try {
+            for (const node of pending) {
+                if (signal?.aborted) throw new Error("aborted");
+
+                engine.setPosition(node.state.fen);
+
+                const lines = await engine.evaluate({
+                    depth,
+                    timeLimit,
+                    mode: "depth"
+                });
+
+                node.state.engineLines.push(...lines);
+                putCachedLines(node.state.fen, lines);
+
+                if (engine.lastDepthReached < depth) consistentDepth = false;
+
+                done++;
+                onProgress?.({
+                    progress: done / nodes.length,
+                    stage: "evaluating",
+                    cloudHits,
+                    cacheHits
+                });
+            }
+        } finally {
+            // keep the worker warm for realtime; just stop the search
+            enginePool.stop();
+        }
+    }
+
+    onProgress?.({
+        progress: 1, stage: "classifying", cloudHits, cacheHits
+    });
 
     // Run the WintrChess reporter (classifications + accuracy)
     getGameAnalysis(game.stateTree);
@@ -115,9 +168,9 @@ export async function analyseGame(
     const accuracies = getStrictGameAccuracy(game.stateTree)
         || getGameAccuracy(game.stateTree);
 
-    onProgress?.({ progress: 1, stage: "done", cloudHits });
+    onProgress?.({ progress: 1, stage: "done", cloudHits, cacheHits });
 
-    return { accuracies, cloudHits };
+    return { accuracies, cloudHits, cacheHits, consistentDepth };
 }
 
 /** Counts each move classification in the mainline for both colours. */

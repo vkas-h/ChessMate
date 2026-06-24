@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
     SkipBack, ChevronLeft, ChevronRight, SkipForward,
-    FlipVertical2, Play, Pause, Share2, Zap, Save, Check, Cloud
+    FlipVertical2, Play, Pause, Share2, Zap, BarChart3, List
 } from "lucide-react";
 import { Chessboard } from "react-chessboard";
 import { Chess, Move } from "chess.js";
@@ -11,27 +11,23 @@ import { Classification } from "@/constants/Classification";
 import { getTopEngineLine } from "@/types/game/position/EngineLine";
 
 import { useAppStore } from "../store";
-import { analyseGame, countClassifications } from "../engine/analyse";
+import { countClassifications } from "../engine/analyse";
 import { realtimeAnalyser } from "../engine/realtime";
-import {
-    AnalysisPreset,
-    presets,
-    loadPreset,
-    savePreset
-} from "../engine/presets";
-import { saveGame } from "../lib/library";
+import { enginePool } from "../engine/enginePool";
+import { hydrateEvalCache } from "../engine/evalCache";
+import { useAnalysisRunner } from "./useAnalysisRunner";
+import GameReport from "./GameReport";
+import { AnalysisPreset, presets } from "../engine/presets";
 import {
     classificationColours,
     classificationIcon,
-    classificationNames,
-    reportOrder
+    classificationNames
 } from "../lib/classifications";
 import EvalBar from "../components/EvalBar";
 import MoveStrip from "../components/MoveStrip";
-import ReportSummary from "../components/ReportSummary";
 import EngineLines from "../components/EngineLines";
-import EvalGraph from "../components/EvalGraph";
 import ShareDialog from "../components/ShareDialog";
+import FullMoveList from "../components/FullMoveList";
 
 type ArrowMode = "off" | "continuation" | "alternative";
 
@@ -48,8 +44,7 @@ function AnalysisScreen() {
         game, currentNode, treeVersion, flipped, gameLoaded,
         analysing, analysisProgress, analysed, accuracies,
         stepForward, stepBackward, goToStart, goToEnd,
-        flipBoard, addMove, bumpTreeVersion,
-        setAnalysing, setAnalysisProgress, finishAnalysis
+        flipBoard, addMove, bumpTreeVersion
     } = useAppStore();
 
     const node = currentNode;
@@ -74,10 +69,23 @@ function AnalysisScreen() {
     }, [node, analysing, gameLoaded, bumpTreeVersion]);
 
     const [boardWidth, setBoardWidth] = useState(360);
-    const [saved, setSaved] = useState(false);
-    const [preset, setPreset] = useState<AnalysisPreset>(loadPreset);
+    const [promotion, setPromotion] = useState<
+        { from: string; to: string } | null
+    >(null);
+
+    // Analysis lifecycle (run/cancel/save/preset/errors) lives in a hook.
+    const analysis = useAnalysisRunner(game, treeVersion);
+    const {
+        preset, choosePreset,
+        error: analysisError, setError: setAnalysisError,
+        depthWarning, saved
+    } = analysis;
+
     const shareOpen = useAppStore(state => state.shareOpen);
     const setShareOpen = useAppStore(state => state.setShareOpen);
+    const analysisView = useAppStore(state => state.analysisView);
+    const setAnalysisView = useAppStore(state => state.setAnalysisView);
+    const [fullMoveList, setFullMoveList] = useState(false);
     const [autoplay, setAutoplay] = useState(false);
 
     const [arrowMode, setArrowMode] = useState<ArrowMode>(() => {
@@ -99,12 +107,18 @@ function AnalysisScreen() {
     }
 
     const boardAreaRef = useRef<HTMLDivElement | null>(null);
-    const abortRef = useRef<AbortController | null>(null);
 
-    function choosePreset(next: AnalysisPreset) {
-        setPreset(next);
-        savePreset(next);
-    }
+    // Revert the "Saved" badge if the tree changed after a save.
+    useEffect(() => {
+        analysis.checkStale();
+    }, [treeVersion]);
+
+    // Warm the shared engine + eval cache as soon as the analysis
+    // screen is open, so the first evaluation isn't a cold WASM start.
+    useEffect(() => {
+        void hydrateEvalCache();
+        enginePool.warm();
+    }, []);
 
     useEffect(() => {
         function updateWidth() {
@@ -129,6 +143,10 @@ function AnalysisScreen() {
         return () => window.removeEventListener("keydown", onKey);
     }, [stepForward, stepBackward]);
 
+    // Set true for the single node-change that autoplay itself causes,
+    // so the cancel-on-manual-navigation effect can tell them apart.
+    const autoplayStepRef = useRef(false);
+
     // Autoplay: step forward every 1.2s until the line ends
     useEffect(() => {
         if (!autoplay) return;
@@ -137,10 +155,12 @@ function AnalysisScreen() {
             const state = useAppStore.getState();
             const before = state.currentNode;
 
+            autoplayStepRef.current = true;
             state.stepForward();
 
             // Reached the end of the line: stop
             if (useAppStore.getState().currentNode == before) {
+                autoplayStepRef.current = false;
                 setAutoplay(false);
             }
         }, 1200);
@@ -148,9 +168,15 @@ function AnalysisScreen() {
         return () => clearInterval(interval);
     }, [autoplay]);
 
-    // Any manual navigation cancels autoplay
+    // Any MANUAL navigation cancels autoplay. This fires on every
+    // position change (taps on moves/graph/engine lines, swipes, keys);
+    // we ignore only the change autoplay made itself.
     useEffect(() => {
-        // (covers taps on moves/graph/engine lines as well)
+        if (autoplayStepRef.current) {
+            autoplayStepRef.current = false;
+            return;
+        }
+        setAutoplay(false);
     }, [node]);
 
     const topLine = getTopEngineLine(node.state.engineLines);
@@ -231,7 +257,7 @@ function AnalysisScreen() {
 
         const colour = node.state.classification
             ? classificationColours[node.state.classification] + "66"
-            : "rgba(155, 199, 0, 0.41)";
+            : "rgba(0, 122, 255, 0.4)";
 
         return {
             [lastMove.from]: { backgroundColor: colour },
@@ -273,7 +299,7 @@ function AnalysisScreen() {
 
         // Highlight the selected piece's square
         styles[selectedSquare] = {
-            backgroundColor: "rgba(212, 168, 67, 0.5)"
+            backgroundColor: "rgba(0, 122, 255, 0.5)"
         };
 
         // Dots on legal destinations; rings on captures
@@ -299,12 +325,32 @@ function AnalysisScreen() {
         [lastMoveSquares, tapSquareStyles]
     );
 
-    function tryMove(from: string, to: string) {
+    /**
+     * Is from->to a LEGAL promoting move in the current position?
+     * Used for click-to-move (our own picker) and for the board's
+     * native drag promotion dialog (onPromotionCheck). Crucially this
+     * is legality-aware, so it never fires for illegal drags or when
+     * it isn't that side's turn.
+     */
+    function isPromotion(from: string, to: string) {
+        try {
+            return new Chess(node.state.fen)
+                .moves({ square: from as any, verbose: true })
+                .some(move => move.to == to && Boolean(move.promotion));
+        } catch {
+            return false;
+        }
+    }
+
+    /** Play from->to (optionally with a chosen promotion piece). */
+    function commitMove(
+        from: string,
+        to: string,
+        promotionPiece: "q" | "r" | "b" | "n"
+    ) {
         try {
             const move: Move = new Chess(node.state.fen).move({
-                from,
-                to,
-                promotion: "q"
+                from, to, promotion: promotionPiece
             });
 
             setSelectedSquare(null);
@@ -313,6 +359,27 @@ function AnalysisScreen() {
         } catch {
             return false;
         }
+    }
+
+    /**
+     * Tap-to-move entry point. For a legal promotion it opens OUR picker
+     * (the board's native dialog only covers drag-and-drop); otherwise
+     * it plays the move directly.
+     */
+    function tryMove(from: string, to: string) {
+        if (isPromotion(from, to)) {
+            setSelectedSquare(null);
+            setPromotion({ from, to });
+            return true;
+        }
+        return commitMove(from, to, "q");
+    }
+
+    function completePromotion(piece: "q" | "r" | "b" | "n") {
+        if (!promotion) return;
+        const { from, to } = promotion;
+        setPromotion(null);
+        commitMove(from, to, piece);
     }
 
     function onSquareClick(square: string) {
@@ -362,43 +429,29 @@ function AnalysisScreen() {
         };
     }, [lastMove, boardWidth, flipped]);
 
-    async function startAnalysis() {
-        if (analysing) {
-            abortRef.current?.abort();
-            return;
-        }
-
-        setSaved(false);
-        setAnalysing(true);
-
-        const controller = new AbortController();
-        abortRef.current = controller;
-
-        const config = presets[preset];
-
-        try {
-            const result = await analyseGame(game, {
-                depth: config.depth,
-                timeLimit: config.timeLimit,
-                useCloud: config.useCloud,
-                signal: controller.signal,
-                onProgress: progress => setAnalysisProgress(progress)
-            });
-
-            finishAnalysis(result.accuracies);
-        } catch {
-            setAnalysing(false);
-            setAnalysisProgress(null);
-        }
-    }
-
-    async function onSave() {
-        await saveGame(game, accuracies);
-        setSaved(true);
-    }
+    const startAnalysis = analysis.start;
+    const onSave = analysis.save;
 
     function onPieceDrop(from: string, to: string) {
-        return tryMove(from, to);
+        // Drag promotions use OUR dark-themed picker, not the library's
+        // white modal. We open it here and return true so the board
+        // doesn't snap the pawn back; the actual move is committed when
+        // the user picks a piece (completePromotion).
+        if (isPromotion(from, to)) {
+            setPromotion({ from, to });
+            return true;
+        }
+
+        return commitMove(from, to, "q");
+    }
+
+    /**
+     * Always return false so react-chessboard NEVER opens its own
+     * (white, off-theme) promotion dialog. Drag promotions are handled
+     * by onPieceDrop -> our custom picker instead.
+     */
+    function onPromotionCheck() {
+        return false;
     }
 
     const whiteName = game.players.white.username || "White";
@@ -426,14 +479,17 @@ function AnalysisScreen() {
                 height: 64,
                 borderRadius: "var(--r-lg)",
                 background: "var(--surface-1)",
+                border: "1px solid var(--line)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 32,
-                marginBottom: 8,
-                opacity: 0.9
+                marginBottom: 8
             }}>
-                ♞
+                <img
+                    src="/logo-knight.png"
+                    alt="ChessMate"
+                    style={{ width: 38, height: 38, opacity: 0.9 }}
+                />
             </div>
 
             <div style={{ fontWeight: 800, fontSize: 17 }}>
@@ -464,6 +520,15 @@ function AnalysisScreen() {
                 Import a game
             </button>
         </div>;
+    }
+
+    // Separate Game Report page (Chess.com-style). Share dialog still
+    // renders here so it overlays the report too.
+    if (analysisView == "report" && analysed) {
+        return <>
+            <GameReport onSave={() => void onSave()} saved={saved} />
+            {shareOpen && <ShareDialog onClose={() => setShareOpen(false)} />}
+        </>;
     }
 
     return <div style={{
@@ -507,7 +572,9 @@ function AnalysisScreen() {
                 <Chessboard
                     position={node.state.fen}
                     boardOrientation={flipped ? "black" : "white"}
-                    onPieceDrop={onPieceDrop}
+                    onPieceDrop={onPieceDrop as any}
+                    onPromotionCheck={onPromotionCheck as any}
+                    autoPromoteToQueen={false}
                     onSquareClick={onSquareClick as any}
                     onPieceDragBegin={(_piece, square) => {
                         // Dragging also shows the dots
@@ -636,8 +703,34 @@ function AnalysisScreen() {
         {/* Realtime engine lines */}
         <EngineLines />
 
-        {/* Move navigation */}
-        <MoveStrip />
+        {/* Move navigation: horizontal strip + expand-to-full-list */}
+        <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8
+        }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <MoveStrip />
+            </div>
+            <button
+                onClick={() => setFullMoveList(true)}
+                aria-label="Show all moves"
+                title="All moves"
+                style={{
+                    flexShrink: 0,
+                    padding: "8px",
+                    borderRadius: "var(--r-sm)",
+                    background: "var(--surface-2)",
+                    color: "var(--text-dim)",
+                    display: "flex",
+                    alignItems: "center"
+                }}
+            >
+                <List size={18} />
+            </button>
+        </div>
+
+        {fullMoveList && <FullMoveList onClose={() => setFullMoveList(false)} />}
 
         {/* Controls: FIXED above the bottom tab bar so the buttons
             never shift position as content above changes height */}
@@ -651,30 +744,30 @@ function AnalysisScreen() {
             display: "flex",
             gap: 8,
             padding: "8px 12px",
-            background: "rgba(16, 16, 20, 0.92)",
+            background: "rgba(14, 14, 15, 0.92)",
             backdropFilter: "blur(14px)",
             WebkitBackdropFilter: "blur(14px)",
             borderTop: "1px solid var(--line)",
             zIndex: 40,
             boxSizing: "border-box"
         }}>
-            <NavButton icon={<SkipBack size={18} />} onClick={() => {
+            <NavButton label="Go to start" icon={<SkipBack size={18} />} onClick={() => {
                 setAutoplay(false);
                 goToStart();
             }} />
-            <NavButton icon={<ChevronLeft size={22} />} onClick={() => {
+            <NavButton label="Previous move" icon={<ChevronLeft size={22} />} onClick={() => {
                 setAutoplay(false);
                 stepBackward();
             }} grow />
-            <NavButton icon={<ChevronRight size={22} />} onClick={() => {
+            <NavButton label="Next move" icon={<ChevronRight size={22} />} onClick={() => {
                 setAutoplay(false);
                 stepForward();
             }} grow />
-            <NavButton icon={<SkipForward size={18} />} onClick={() => {
+            <NavButton label="Go to end" icon={<SkipForward size={18} />} onClick={() => {
                 setAutoplay(false);
                 goToEnd();
             }} />
-            <NavButton icon={<FlipVertical2 size={18} />} onClick={flipBoard} />
+            <NavButton label="Flip board" icon={<FlipVertical2 size={18} />} onClick={flipBoard} />
         </div>
 
         {/* Secondary toolbar */}
@@ -685,6 +778,8 @@ function AnalysisScreen() {
         }}>
             <button
                 onClick={() => setAutoplay(!autoplay)}
+                aria-label={autoplay ? "Pause autoplay" : "Start autoplay"}
+                aria-pressed={autoplay}
                 style={{
                     flex: 1,
                     padding: "9px 0",
@@ -707,6 +802,7 @@ function AnalysisScreen() {
 
             <button
                 onClick={cycleArrowMode}
+                aria-label={arrowModeLabels[arrowMode]}
                 style={{
                     flex: 1.4,
                     padding: "9px 0",
@@ -724,6 +820,7 @@ function AnalysisScreen() {
 
             <button
                 onClick={() => setShareOpen(true)}
+                aria-label="Share or export game"
                 style={{
                     flex: 1,
                     padding: "9px 0",
@@ -811,17 +908,24 @@ function AnalysisScreen() {
                 position: "absolute",
                 inset: 0,
                 width: `${(analysisProgress?.progress || 0) * 100}%`,
-                background: "rgba(212, 168, 67, 0.25)",
+                background: "rgba(0, 122, 255, 0.25)",
                 transition: "width 0.2s"
             }} />}
 
             <span style={{ position: "relative" }}>
                 {analysing
-                    ? `Analysing... ${Math.round(
-                        (analysisProgress?.progress || 0) * 100
-                    )}%`
+                    ? (analysisProgress?.stage == "preparing"
+                        ? "Preparing…"
+                        : analysisProgress?.stage == "classifying"
+                            ? "Classifying…"
+                            : `Analysing... ${Math.round(
+                                (analysisProgress?.progress || 0) * 100
+                            )}%`)
                     + ((analysisProgress?.cloudHits || 0) > 0
                         ? ` · ☁ ${analysisProgress?.cloudHits}`
+                        : "")
+                    + ((analysisProgress?.cacheHits || 0) > 0
+                        ? ` · ⚡${analysisProgress?.cacheHits}`
                         : "")
                     + " (tap to cancel)"
                     : analysed
@@ -833,37 +937,71 @@ function AnalysisScreen() {
             </span>
         </button>
 
-        {/* Report */}
-        {analysed && classifCounts && <>
-            <EvalGraph />
+        {/* View Game Report (the full report lives on its own page) */}
+        {analysed && classifCounts && <button
+            onClick={() => setAnalysisView("report")}
+            style={{
+                width: "100%",
+                margin: "12px 0 4px",
+                padding: "14px 0",
+                borderRadius: "var(--r-md)",
+                background: "var(--surface-2)",
+                border: "1px solid var(--line-strong)",
+                color: "var(--text)",
+                fontWeight: 800,
+                fontSize: "0.95rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8
+            }}
+        >
+            <BarChart3 size={17} />
+            View Game Report
+            {accuracies && !isNaN(accuracies.white) && <span style={{
+                color: "var(--text-dim)",
+                fontWeight: 700,
+                fontSize: "0.82rem"
+            }}>
+                · {accuracies.white.toFixed(0)}% / {accuracies.black.toFixed(0)}%
+            </span>}
+            <ChevronRight size={18} />
+        </button>}
 
-            <ReportSummary
-                accuracies={accuracies}
-                counts={classifCounts}
-                order={reportOrder}
-            />
+        {/* Inline error / depth warning */}
+        {analysisError && <div
+            role="alert"
+            style={{
+                marginTop: 10,
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "rgba(201, 50, 48, 0.14)",
+                border: "1px solid rgba(201, 50, 48, 0.4)",
+                color: "#e08886",
+                fontSize: "0.85rem",
+                fontWeight: 600
+            }}
+        >
+            {analysisError}
+        </div>}
 
-            <button
-                onClick={() => void onSave()}
-                disabled={saved}
-                style={{
-                    width: "100%",
-                    margin: "10px 0 16px",
-                    padding: "13px 0",
-                    borderRadius: "var(--r-md)",
-                    background: saved ? "var(--surface-1)" : "var(--surface-2)",
-                    border: "1px solid var(--line)",
-                    color: saved ? "var(--good)" : "var(--text)",
-                    fontWeight: 700
-                }}
-            >
-                {saved
-                    ? <><Check size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />Saved to library</>
-                    : <><Save size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />Save to library</>}
-            </button>
-        </>}
+        {analysed && depthWarning && !analysisError && <div style={{
+            marginTop: 8,
+            color: "var(--text-faint)",
+            fontSize: "0.72rem",
+            textAlign: "center"
+        }}>
+            ⓘ Some positions fell short of the target depth — accuracy is
+            approximate.
+        </div>}
 
         {shareOpen && <ShareDialog onClose={() => setShareOpen(false)} />}
+
+        {promotion && <PromotionDialog
+            colour={new Chess(node.state.fen).turn()}
+            onPick={completePromotion}
+            onCancel={() => setPromotion(null)}
+        />}
 
         <div style={{ height: 16 }} />
     </div>;
@@ -915,9 +1053,12 @@ function NavButton(props: {
     icon: React.ReactNode;
     onClick: () => void;
     grow?: boolean;
+    label?: string;
 }) {
     return <button
         onClick={props.onClick}
+        aria-label={props.label}
+        title={props.label}
         style={{
             flex: props.grow ? 2 : 1,
             padding: "11px 0",
@@ -931,6 +1072,67 @@ function NavButton(props: {
     >
         {props.icon}
     </button>;
+}
+
+const PROMO_GLYPHS: Record<string, Record<string, string>> = {
+    w: { q: "♕", r: "♖", b: "♗", n: "♘" },
+    b: { q: "♛", r: "♜", b: "♝", n: "♞" }
+};
+
+function PromotionDialog(props: {
+    colour: "w" | "b";
+    onPick: (piece: "q" | "r" | "b" | "n") => void;
+    onCancel: () => void;
+}) {
+    const pieces: ("q" | "r" | "b" | "n")[] = ["q", "r", "b", "n"];
+
+    return <div
+        onClick={props.onCancel}
+        style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            zIndex: 120,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+        }}
+    >
+        <div
+            onClick={event => event.stopPropagation()}
+            role="dialog"
+            aria-label="Choose promotion piece"
+            style={{
+                background: "var(--surface-1)",
+                border: "1px solid var(--line)",
+                borderRadius: "var(--r-lg)",
+                padding: 16,
+                display: "flex",
+                gap: 10
+            }}
+        >
+            {pieces.map(piece => <button
+                key={piece}
+                onClick={() => props.onPick(piece)}
+                aria-label={{
+                    q: "Queen", r: "Rook", b: "Bishop", n: "Knight"
+                }[piece]}
+                style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: "var(--r-md)",
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--line)",
+                    fontSize: 34,
+                    lineHeight: 1,
+                    color: "var(--text)",
+                    cursor: "pointer"
+                }}
+            >
+                {PROMO_GLYPHS[props.colour][piece]}
+            </button>)}
+        </div>
+    </div>;
 }
 
 export default AnalysisScreen;

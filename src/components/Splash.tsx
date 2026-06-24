@@ -43,20 +43,22 @@ function Splash(props: { onDone: () => void }) {
     >
         {/* knight tile */}
         <div style={{
-            width: 76,
-            height: 76,
-            borderRadius: 20,
-            background:
-                "linear-gradient(135deg, var(--accent) 0%, #a87f2c 100%)",
+            width: 96,
+            height: 96,
+            borderRadius: 24,
+            background: "var(--surface-1)",
+            border: "1px solid var(--line)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 42,
-            color: "var(--accent-text)",
-            boxShadow: "0 8px 40px rgba(212, 168, 67, 0.25)",
+            boxShadow: "0 8px 40px rgba(0, 0, 0, 0.5)",
             animation: "splashTile 0.5s var(--ease) both"
         }}>
-            ♞
+            <img
+                src="/logo-knight.png"
+                alt="ChessMate"
+                style={{ width: 60, height: 60 }}
+            />
         </div>
 
         {/* app name */}

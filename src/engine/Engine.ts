@@ -16,6 +16,9 @@ class Engine {
 
     private position = STARTING_FEN;
 
+    /** Deepest `info depth` seen during the most recent evaluate(). */
+    public lastDepthReached = 0;
+
     constructor(version: EngineVersion) {
         this.worker = new Worker("/engines/" + version);
         this.version = version;
@@ -87,19 +90,34 @@ class Engine {
     async evaluate(options: {
         depth: number;
         timeLimit?: number;
+        /**
+         * "depth"  -> search to the target depth (timeLimit is only a
+         *             hard safety ceiling so we never hang).
+         * "time"   -> search for timeLimit ms regardless of depth.
+         * Default "depth" keeps the preset's depth promise honest.
+         */
+        mode?: "depth" | "time";
         onEngineLine?: (line: EngineLine) => void;
     }): Promise<EngineLine[]> {
         const engineLines: EngineLine[] = [];
+        this.lastDepthReached = 0;
 
-        const maxTimeArgument = options.timeLimit
-            ? `movetime ${options.timeLimit}` : "";
+        const mode = options.mode ?? "depth";
+
+        // In depth mode the movetime is a generous SAFETY ceiling only
+        // (so a position can't hang forever); the depth is the real
+        // target. In time mode we omit depth and search by time.
+        const goCommand = mode == "time" && options.timeLimit
+            ? `go movetime ${options.timeLimit}`
+            : `go depth ${options.depth}`
+                + (options.timeLimit ? ` movetime ${options.timeLimit}` : "");
 
         await this.consumeLogs(
-            `go depth ${options.depth} ${maxTimeArgument}`,
-            log => (
-                log.startsWith("bestmove")
-                || log.includes("depth 0")
-            ),
+            goCommand,
+            // `bestmove` is the ONLY authoritative terminator. (The old
+            // `includes("depth 0")` substring match could end a search
+            // early on unrelated info lines.)
+            log => log.startsWith("bestmove"),
             log => {
                 if (!log.startsWith("info depth")) return;
                 if (log.includes("currmove")) return;
@@ -107,6 +125,8 @@ class Engine {
                 // Extract depth and multipv index of line
                 const depth = parseInt(log.match(/(?<= depth )\d+/)?.[0] || "");
                 if (isNaN(depth)) return;
+
+                if (depth > this.lastDepthReached) this.lastDepthReached = depth;
 
                 const index = parseInt(log.match(/(?<= multipv )\d+/)?.[0] || "") || 1;
 

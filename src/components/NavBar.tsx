@@ -22,7 +22,7 @@ function NavBar() {
         maxWidth: 560,
         height: "calc(var(--nav-height) + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        background: "rgba(16, 16, 20, 0.88)",
+        background: "rgba(14, 14, 15, 0.9)",
         backdropFilter: "blur(18px)",
         WebkitBackdropFilter: "blur(18px)",
         borderTop: "1px solid var(--line)",

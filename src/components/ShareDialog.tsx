@@ -154,7 +154,7 @@ function copyButtonStyle(active: boolean): React.CSSProperties {
         fontSize: "0.78rem",
         fontWeight: 700,
         background: active ? "var(--good)" : "var(--surface-2)",
-        color: active ? "#141318" : "var(--text)",
+        color: active ? "#1a1a1b" : "var(--text)",
         border: "1px solid var(--line)",
         transition: "background 0.15s"
     };

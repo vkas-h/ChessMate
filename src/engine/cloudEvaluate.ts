@@ -80,4 +80,43 @@ async function getCloudEvaluation(
     return engineLines;
 }
 
+/**
+ * Fetch cloud evaluations for many FENs CONCURRENTLY with a bounded
+ * worker pool, instead of one-at-a-time. Network round-trips dominate
+ * cloud eval time, so doing them in parallel is a big speedup. Returns
+ * a map of fen -> lines for every position that was actually in the
+ * cloud database (misses are simply absent).
+ */
+export async function getCloudEvaluationsBatch(
+    fens: string[],
+    targetCount = 2,
+    concurrency = 5
+): Promise<Map<string, EngineLine[]>> {
+    const results = new Map<string, EngineLine[]>();
+
+    // De-duplicate so transpositions are only requested once.
+    const unique = [...new Set(fens)];
+    let cursor = 0;
+
+    async function worker() {
+        while (cursor < unique.length) {
+            const fen = unique[cursor++];
+            try {
+                results.set(fen, await getCloudEvaluation(fen, targetCount));
+            } catch {
+                // miss / failure -> leave absent
+            }
+        }
+    }
+
+    await Promise.all(
+        Array.from(
+            { length: Math.min(concurrency, unique.length) },
+            () => worker()
+        )
+    );
+
+    return results;
+}
+
 export default getCloudEvaluation;

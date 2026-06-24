@@ -8,13 +8,15 @@ import {
     classificationIcon,
     classificationNames
 } from "../lib/classifications";
+import { accuracyDescriptor } from "../lib/report";
 
 function ReportSummary(props: {
     accuracies?: { white: number; black: number };
     counts: Record<string, { white: number; black: number }>;
     order: Classification[];
+    /** Tap a classification row to jump to that kind of move. */
+    onJumpToClassification?: (classif: Classification) => void;
 }) {
-    // For micro bar scaling
     const maxCount = Math.max(
         1,
         ...props.order.map(classif => {
@@ -24,7 +26,6 @@ function ReportSummary(props: {
     );
 
     return <div style={{
-        marginTop: 14,
         background: "var(--surface-1)",
         borderRadius: "var(--r-lg)",
         padding: "16px 16px 10px"
@@ -39,7 +40,7 @@ function ReportSummary(props: {
             alignItems: "center",
             gap: 7
         }}>
-            <BarChart3 size={15} /> GAME REPORT
+            <BarChart3 size={15} /> MOVE QUALITY
         </h3>
 
         {/* accuracy stat blocks */}
@@ -59,7 +60,7 @@ function ReportSummary(props: {
             />
         </div>}
 
-        {/* classification rows with micro bars */}
+        {/* classification rows with micro bars (tappable) */}
         {props.order.map(classif => {
             const count = props.counts[classif];
             if (!count || (count.white == 0 && count.black == 0))
@@ -67,16 +68,22 @@ function ReportSummary(props: {
 
             const colour = classificationColours[classif];
 
-            return <div
+            return <button
                 key={classif}
+                onClick={() => props.onJumpToClassification?.(classif)}
+                aria-label={`Jump to first ${classificationNames[classif]} move`}
                 style={{
+                    width: "100%",
                     display: "flex",
                     alignItems: "center",
-                    padding: "6px 0",
-                    gap: 10
+                    padding: "6px 6px",
+                    gap: 10,
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer"
                 }}
             >
-                {/* white count + bar (grows leftward) */}
                 <div style={{
                     flex: 1,
                     display: "flex",
@@ -87,8 +94,7 @@ function ReportSummary(props: {
                     <div style={{
                         height: 4,
                         width: `${(count.white / maxCount) * 70}%`,
-                        background: count.white > 0
-                            ? colour : "transparent",
+                        background: count.white > 0 ? colour : "transparent",
                         borderRadius: 2,
                         opacity: 0.55
                     }} />
@@ -104,7 +110,6 @@ function ReportSummary(props: {
                     </span>
                 </div>
 
-                {/* centre label */}
                 <span style={{
                     width: 110,
                     display: "flex",
@@ -123,7 +128,6 @@ function ReportSummary(props: {
                     {classificationNames[classif]}
                 </span>
 
-                {/* black count + bar (grows rightward) */}
                 <div style={{
                     flex: 1,
                     display: "flex",
@@ -142,13 +146,12 @@ function ReportSummary(props: {
                     <div style={{
                         height: 4,
                         width: `${(count.black / maxCount) * 70}%`,
-                        background: count.black > 0
-                            ? colour : "transparent",
+                        background: count.black > 0 ? colour : "transparent",
                         borderRadius: 2,
                         opacity: 0.55
                     }} />
                 </div>
-            </div>;
+            </button>;
         })}
     </div>;
 }
@@ -158,19 +161,19 @@ function AccuracyBlock(props: {
     value: number;
     light?: boolean;
 }) {
-    const display = isNaN(props.value)
-        ? "—" : props.value.toFixed(1);
+    const display = isNaN(props.value) ? "—" : props.value.toFixed(1);
+    const descriptor = accuracyDescriptor(props.value);
 
     return <div style={{
         flex: 1,
-        background: props.light ? "#ecebee" : "var(--surface-2)",
-        color: props.light ? "#141318" : "var(--text)",
+        background: props.light ? "#f5f5f7" : "var(--surface-2)",
+        color: props.light ? "#1a1a1b" : "var(--text)",
         borderRadius: "var(--r-md)",
-        padding: "10px 14px",
+        padding: "12px 14px",
         textAlign: "center"
     }}>
         <div style={{
-            fontSize: 22,
+            fontSize: 24,
             fontWeight: 800,
             lineHeight: 1.1,
             fontFamily: "ui-monospace, monospace"
@@ -186,6 +189,14 @@ function AccuracyBlock(props: {
             marginTop: 2
         }}>
             {props.label.toUpperCase()} ACCURACY
+        </div>
+        <div style={{
+            fontSize: 11,
+            fontWeight: 800,
+            marginTop: 4,
+            color: props.light ? descriptor.colour : descriptor.colour
+        }}>
+            {descriptor.label}
         </div>
     </div>;
 }

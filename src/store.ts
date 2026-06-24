@@ -58,6 +58,12 @@ export function initHistorySync() {
             return;
         }
 
+        // Then it returns from the Game Report to the board.
+        if (store.analysisView == "report") {
+            useAppStore.setState({ analysisView: "board" });
+            return;
+        }
+
         const target: Screen =
             (event.state && event.state.screen) || "home";
 
@@ -121,6 +127,14 @@ interface AppState {
     shareOpen: boolean;
     setShareOpen: (open: boolean) => void;
 
+    /**
+     * Which sub-view of the Analyse tab is showing: the board/engine
+     * view or the separate Game Report page. In the store so the
+     * Android/browser back button can return report -> board.
+     */
+    analysisView: "board" | "report";
+    setAnalysisView: (view: "board" | "report") => void;
+
     /** Search state persists across screen switches. */
     searchResults: Game[];
     searchUsername: string;
@@ -183,6 +197,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
     },
 
+    analysisView: "board",
+
+    setAnalysisView: view => {
+        const current = get().analysisView;
+        if (view == current) return;
+
+        if (view == "report") {
+            // Opening the report pushes a history entry so Back returns
+            // to the board (mirrors the share-dialog pattern).
+            pushEntry(get().screen);
+            set({ analysisView: "report" });
+        } else {
+            // Returning to the board via UI: consume the pushed entry.
+            suppressNextPop = true;
+            set({ analysisView: "board" });
+            try { window.history.back(); } catch { /* ignore */ }
+        }
+    },
+
     searchResults: [],
     searchUsername: "",
     setSearchResults: (games, username) => set({
@@ -235,6 +268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             analysisProgress: null,
             accuracies: undefined,
             libraryId: undefined,
+            analysisView: "board",
             screen: "analysis"
         });
     },
@@ -251,6 +285,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             analysing: false,
             analysisProgress: null,
             accuracies,
+            analysisView: "board",
             screen: "analysis"
         });
     },

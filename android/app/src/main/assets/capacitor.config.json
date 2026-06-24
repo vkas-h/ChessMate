@@ -1,0 +1,16 @@
+{
+	"appId": "com.vkas.chessmate",
+	"appName": "ChessMate",
+	"webDir": "dist",
+	"android": {
+		"backgroundColor": "#0e0e0f"
+	},
+	"plugins": {
+		"SplashScreen": {
+			"backgroundColor": "#0e0e0f",
+			"launchShowDuration": 0,
+			"launchAutoHide": true,
+			"showSpinner": false
+		}
+	}
+}

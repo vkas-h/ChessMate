@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Library as LibraryIcon, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Library as LibraryIcon, Trash2, Search, X } from "lucide-react";
 
 import GameResult from "@/constants/game/GameResult";
 
@@ -11,11 +11,16 @@ import {
     SavedGameSummary
 } from "../lib/library";
 
+type Sort = "recent" | "accuracy";
+
 function LibraryScreen() {
     const setLoadedAnalysis = useAppStore(state => state.setLoadedAnalysis);
 
     const [games, setGames] = useState<SavedGameSummary[]>([]);
     const [loading, setLoading] = useState(true);
+    const [query, setQuery] = useState("");
+    const [sort, setSort] = useState<Sort>("recent");
+    const [confirmId, setConfirmId] = useState<string | null>(null);
 
     async function refresh() {
         setLoading(true);
@@ -37,10 +42,36 @@ function LibraryScreen() {
 
     async function removeGame(id: string) {
         await deleteGame(id);
+        setConfirmId(null);
         await refresh();
     }
 
-    return <div style={{ padding: "20px 16px" }}>
+    const visible = useMemo(() => {
+        const q = query.trim().toLowerCase();
+
+        const filtered = q
+            ? games.filter(game =>
+                game.white.toLowerCase().includes(q)
+                || game.black.toLowerCase().includes(q))
+            : games;
+
+        if (sort == "accuracy") {
+            return [...filtered].sort((a, b) => {
+                const aMax = Math.max(
+                    a.accuracies?.white ?? 0, a.accuracies?.black ?? 0
+                );
+                const bMax = Math.max(
+                    b.accuracies?.white ?? 0, b.accuracies?.black ?? 0
+                );
+                return bMax - aMax;
+            });
+        }
+
+        // already newest-first from listGames
+        return filtered;
+    }, [games, query, sort]);
+
+    return <div style={{ padding: "20px 16px 80px" }}>
         <h1 style={{
             margin: "8px 0 4px",
             fontSize: 22,
@@ -52,26 +83,96 @@ function LibraryScreen() {
             My library
         </h1>
         <p style={{
-            margin: "0 0 18px",
+            margin: "0 0 16px",
             color: "var(--text-dim)",
             fontSize: "0.9rem"
         }}>
             Analysed games saved on this device
         </p>
 
+        {/* Search + sort (only when there are games) */}
+        {games.length > 0 && <div style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 14
+        }}>
+            <div style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "var(--surface-1)",
+                border: "1px solid var(--line)",
+                borderRadius: "var(--r-md)",
+                padding: "0 10px"
+            }}>
+                <Search size={15} style={{ color: "var(--text-faint)" }} />
+                <input
+                    value={query}
+                    onChange={event => setQuery(event.target.value)}
+                    placeholder="Search players…"
+                    style={{
+                        flex: 1,
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        color: "var(--text)",
+                        padding: "10px 0",
+                        fontSize: 14,
+                        minWidth: 0
+                    }}
+                />
+                {query && <button
+                    onClick={() => setQuery("")}
+                    aria-label="Clear search"
+                    style={{ color: "var(--text-faint)", display: "flex" }}
+                >
+                    <X size={15} />
+                </button>}
+            </div>
+
+            <button
+                onClick={() => setSort(sort == "recent" ? "accuracy" : "recent")}
+                style={{
+                    flexShrink: 0,
+                    padding: "0 12px",
+                    borderRadius: "var(--r-md)",
+                    background: "var(--surface-1)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text-dim)",
+                    fontSize: 12.5,
+                    fontWeight: 700
+                }}
+            >
+                {sort == "recent" ? "Recent" : "Accuracy"}
+            </button>
+        </div>}
+
         {loading && <p style={{ color: "var(--text-dim)" }}>Loading…</p>}
 
         {!loading && games.length == 0 && <div style={{
             textAlign: "center",
-            padding: "48px 0",
+            padding: "64px 0",
             color: "var(--text-dim)"
         }}>
-            <div style={{ fontSize: 38, marginBottom: 10, opacity: 0.5 }}>♞</div>
+            <img
+                src="/logo-knight.png"
+                alt="ChessMate"
+                style={{ width: 44, height: 44, marginBottom: 10, opacity: 0.4 }}
+            /><br />
             Nothing here yet.<br />
             Analyse a game and tap "Save to library".
         </div>}
 
-        {games.map(game => <div
+        {!loading && games.length > 0 && visible.length == 0 && <p style={{
+            color: "var(--text-faint)",
+            textAlign: "center",
+            padding: "32px 0"
+        }}>
+            No games match "{query}".
+        </p>}
+
+        {visible.map(game => <div
             key={game.id}
             style={{
                 background: "var(--surface-1)",
@@ -118,8 +219,36 @@ function LibraryScreen() {
                 </div>
             </button>
 
-            <button
-                onClick={() => void removeGame(game.id)}
+            {/* Delete with inline confirm */}
+            {confirmId == game.id ? <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button
+                    onClick={() => void removeGame(game.id)}
+                    style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        background: "var(--bad)",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 800
+                    }}
+                >
+                    Delete
+                </button>
+                <button
+                    onClick={() => setConfirmId(null)}
+                    style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        background: "var(--surface-2)",
+                        color: "var(--text-dim)",
+                        fontSize: 12,
+                        fontWeight: 700
+                    }}
+                >
+                    Cancel
+                </button>
+            </div> : <button
+                onClick={() => setConfirmId(game.id)}
                 aria-label="Delete game"
                 style={{
                     color: "var(--text-faint)",
@@ -129,7 +258,7 @@ function LibraryScreen() {
                 }}
             >
                 <Trash2 size={17} />
-            </button>
+            </button>}
         </div>)}
     </div>;
 }

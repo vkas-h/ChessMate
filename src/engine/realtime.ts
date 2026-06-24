@@ -1,4 +1,3 @@
-import EngineVersion from "@/constants/EngineVersion";
 import { StateTreeNode } from "@/types/game/position/StateTreeNode";
 import { getTopEngineLine } from "@/types/game/position/EngineLine";
 import { classify } from "@/lib/reporter/classify";
@@ -6,8 +5,9 @@ import { getMoveAccuracy } from "@/lib/reporter/accuracy";
 import { adaptPieceColour } from "@/constants/PieceColour";
 import { Chess } from "chess.js";
 
-import Engine from "./Engine";
+import { enginePool } from "./enginePool";
 import getCloudEvaluation from "./cloudEvaluate";
+import { getCachedLines, putCachedLines } from "./evalCache";
 
 /** Minimum depth a node must have before we consider it "evaluated". */
 const MIN_DEPTH = 12;
@@ -20,29 +20,20 @@ const IDLE_SHUTDOWN_MS = 30_000;
  * the user plays themselves during analysis), then classifies them
  * with the WintrChess reporter so badges appear on sideline moves.
  *
- * The local Stockfish worker is only spun up when actually needed and
- * is terminated again after a period of inactivity.
+ * Uses the SHARED engine pool (so it doesn't fight with full-game
+ * analysis over a second WASM worker) and the persistent eval cache.
+ * The shared worker is terminated after a period of inactivity to save
+ * battery.
  */
 class RealtimeAnalyser {
-    private engine: Engine | null = null;
     private idleTimer: ReturnType<typeof setTimeout> | null = null;
     private currentToken = 0;
-
-    private getEngine() {
-        if (!this.engine) {
-            this.engine = new Engine(EngineVersion.STOCKFISH_17_LITE);
-            this.engine.setLineCount(2);
-        }
-
-        return this.engine;
-    }
 
     private touchIdleTimer() {
         if (this.idleTimer) clearTimeout(this.idleTimer);
 
         this.idleTimer = setTimeout(() => {
-            this.engine?.terminate();
-            this.engine = null;
+            enginePool.terminate();
         }, IDLE_SHUTDOWN_MS);
     }
 
@@ -79,9 +70,17 @@ class RealtimeAnalyser {
         for (const target of targets) {
             if (token != this.currentToken) return;
 
+            // 1. local cache (instant)
+            const cached = getCachedLines(target.state.fen, MIN_DEPTH);
+            if (cached) {
+                target.state.engineLines.push(...cached);
+                options.onUpdate();
+                continue;
+            }
+
             let evaluated = false;
 
-            // Cloud first (deep + free), local engine fallback
+            // 2. cloud (deep + free)
             try {
                 const cloudLines = await getCloudEvaluation(
                     target.state.fen, 2, 1500
@@ -90,25 +89,29 @@ class RealtimeAnalyser {
                 if (token != this.currentToken) return;
 
                 target.state.engineLines.push(...cloudLines);
+                putCachedLines(target.state.fen, cloudLines);
                 evaluated = true;
             } catch {
                 // cloud miss: fall through to local engine
             }
 
+            // 3. local engine (shared pool, 2 lines for the panel)
             if (!evaluated) {
-                const engine = this.getEngine();
+                const engine = enginePool.acquire(2);
                 this.touchIdleTimer();
 
                 engine.setPosition(target.state.fen);
 
                 const lines = await engine.evaluate({
                     depth,
-                    timeLimit: 4000
+                    timeLimit: 4000,
+                    mode: "depth"
                 });
 
                 if (token != this.currentToken) return;
 
                 target.state.engineLines.push(...lines);
+                putCachedLines(target.state.fen, lines);
             }
 
             options.onUpdate();
@@ -151,7 +154,7 @@ class RealtimeAnalyser {
     /** Drop any in-flight work (user navigated away). */
     cancel() {
         this.currentToken++;
-        this.engine?.stop();
+        enginePool.stop();
     }
 
     shutdown() {
@@ -159,8 +162,7 @@ class RealtimeAnalyser {
 
         if (this.idleTimer) clearTimeout(this.idleTimer);
 
-        this.engine?.terminate();
-        this.engine = null;
+        enginePool.terminate();
     }
 }
 

@@ -145,8 +145,8 @@ function EngineLines() {
                         borderRadius: 6,
                         fontSize: "0.78rem",
                         fontWeight: 800,
-                        background: winning ? "#ecebee" : "var(--surface-3)",
-                        color: winning ? "#141318" : "#ecebee",
+                        background: winning ? "#f5f5f7" : "var(--surface-3)",
+                        color: winning ? "#1a1a1b" : "#f5f5f7",
                         fontFamily: "ui-monospace, monospace"
                     }}>
                         {evalText}
@@ -157,8 +157,14 @@ function EngineLines() {
                         gap: 2,
                         overflowX: "auto",
                         scrollbarWidth: "none",
-                        whiteSpace: "nowrap"
-                    }}>
+                        whiteSpace: "nowrap",
+                        // fade the right edge so cut-off moves look
+                        // intentional (a "there's more, scroll" cue)
+                        maskImage:
+                            "linear-gradient(to right, #000 88%, transparent)",
+                        WebkitMaskImage:
+                            "linear-gradient(to right, #000 88%, transparent)"
+                    } as React.CSSProperties}>
                         {line.moves.slice(0, 10).map((move, index) => (
                             <button
                                 key={index}

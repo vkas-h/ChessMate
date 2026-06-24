@@ -4,6 +4,7 @@ import {
 } from "@/types/game/position/StateTreeNode";
 import { getTopEngineLine } from "@/types/game/position/EngineLine";
 import PieceColour from "@/constants/PieceColour";
+import { winPercentFromCp } from "@/lib/utils/winProbability";
 
 /**
  * Strict game accuracy — a faithful reimplementation of Lichess's
@@ -33,9 +34,8 @@ function winPercentFromNode(node: StateTreeNode): number | undefined {
         return node.state.moveColour == PieceColour.WHITE ? 100 : 0;
     }
 
-    // Lichess WinPercent.fromCentiPawns
-    const cp = Math.max(-1000, Math.min(1000, evaluation.value));
-    return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+    // Lichess WinPercent.fromCentiPawns (shared helper)
+    return winPercentFromCp(evaluation.value);
 }
 
 function moveAccuracy(winDiff: number) {
