@@ -6,6 +6,7 @@ import { useAppStore } from "../store";
 import { analyseGame } from "../engine/analyse";
 import { realtimeAnalyser } from "../engine/realtime";
 import { saveGame } from "../lib/library";
+import { getToggle } from "../lib/settings";
 import {
     AnalysisPreset,
     presets,
@@ -80,6 +81,12 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
 
             setDepthWarning(!result.consistentDepth);
             finishAnalysis(result.accuracies);
+
+            // Auto-save to the library if the user enabled it, so the
+            // game flows into Insights without a manual tap.
+            if (getToggle("autoSave")) {
+                void saveWith(result.accuracies);
+            }
         } catch (err) {
             setAnalysing(false);
             setAnalysisProgress(null);
@@ -93,11 +100,12 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
         }
     }
 
-    async function save() {
+    /** Save with explicit accuracies (used by auto-save right after analysis). */
+    async function saveWith(acc?: { white: number; black: number }) {
         setError(null);
         try {
             const id = await saveGame(
-                game, accuracies, useAppStore.getState().libraryId
+                game, acc, useAppStore.getState().libraryId
             );
             useAppStore.getState().setLibraryId(id);
             setSaved(true);
@@ -107,6 +115,10 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
                 err instanceof Error ? err.message : "Could not save the game."
             );
         }
+    }
+
+    function save() {
+        return saveWith(accuracies);
     }
 
     return {

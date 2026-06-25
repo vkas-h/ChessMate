@@ -160,6 +160,78 @@ test("accuracyDescriptor buckets", () => {
     assert(accuracyDescriptor(NaN).label == "—", "NaN -> dash");
 });
 
+/* ---------------------- player stats ---------------------- */
+import { computePlayerStats, winRate } from "../src/lib/stats";
+
+const fakeSummaries: any = [
+    // user = "me", plays White, wins
+    { id: "1", savedAt: "2026-01-01", hash: "a", white: "me", black: "x",
+      whiteResult: "win", blackResult: "lose",
+      accuracies: { white: 90, black: 70 }, timeControl: "Blitz",
+      opening: "Sicilian Defense" },
+    // user = "me", plays Black, loses
+    { id: "2", savedAt: "2026-01-02", hash: "b", white: "y", black: "me",
+      whiteResult: "win", blackResult: "lose",
+      accuracies: { white: 80, black: 60 }, timeControl: "Rapid",
+      opening: "French Defense" },
+    // user = "me", plays Black, wins
+    { id: "3", savedAt: "2026-01-03", hash: "c", white: "z", black: "me",
+      whiteResult: "lose", blackResult: "win",
+      accuracies: { white: 50, black: 88 }, timeControl: "Blitz",
+      opening: "Sicilian Defense" },
+    // game NOT involving "me" — must be skipped
+    { id: "4", savedAt: "2026-01-04", hash: "d", white: "p", black: "q",
+      whiteResult: "win", blackResult: "lose" }
+];
+
+test("stats: only counts the user's games", () => {
+    const s = computePlayerStats(fakeSummaries, "me");
+    assert(s.games == 3, `expected 3 games, got ${s.games}`);
+});
+
+test("stats: overall W/D/L from user's perspective", () => {
+    const s = computePlayerStats(fakeSummaries, "me");
+    assert(s.overall.win == 2, `wins ${s.overall.win}`);
+    assert(s.overall.loss == 1, `losses ${s.overall.loss}`);
+});
+
+test("stats: per-colour split", () => {
+    const s = computePlayerStats(fakeSummaries, "me");
+    assert(s.asWhite.total == 1 && s.asWhite.win == 1, "white: 1 game, 1 win");
+    assert(s.asBlack.total == 2 && s.asBlack.win == 1, "black: 2 games, 1 win");
+});
+
+test("stats: accuracy uses the user's own side", () => {
+    const s = computePlayerStats(fakeSummaries, "me");
+    // white game acc 90, black games acc 60 & 88 -> mean (90+60+88)/3
+    approx(s.avgAccuracy, (90 + 60 + 88) / 3, 1e-9);
+});
+
+test("stats: openings aggregated", () => {
+    const s = computePlayerStats(fakeSummaries, "me");
+    const sicilian = s.topOpenings.find(o => o.name == "Sicilian Defense");
+    assert(!!sicilian && sicilian.wdl.total == 2, "Sicilian counted twice");
+});
+
+test("winRate scores draws as half", () => {
+    approx(winRate({ win: 1, draw: 1, loss: 0, total: 2 }), 75);
+});
+
+/* ---------------------- update version compare ---------------------- */
+import { isNewer } from "../src/lib/updates";
+
+test("isNewer: basic semver", () => {
+    assert(isNewer("1.2.0", "1.1.0"), "1.2.0 > 1.1.0");
+    assert(isNewer("v2.0.0", "1.9.9"), "2.0.0 > 1.9.9");
+    assert(!isNewer("1.1.0", "1.1.0"), "equal is not newer");
+    assert(!isNewer("1.0.0", "1.1.0"), "older is not newer");
+});
+
+test("isNewer: handles v-prefix and short tags", () => {
+    assert(isNewer("v1.2", "1.1.9"), "v1.2 > 1.1.9");
+    assert(!isNewer("1.1", "1.1.0"), "1.1 == 1.1.0");
+});
+
 /* ----------------------------- report ----------------------------- */
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failures.length) {

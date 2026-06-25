@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Library as LibraryIcon, Trash2, Search, X } from "lucide-react";
+import { Library as LibraryIcon, Trash2, Search, X, BarChart3 } from "lucide-react";
 
 import GameResult from "@/constants/game/GameResult";
 
@@ -72,16 +72,44 @@ function LibraryScreen() {
     }, [games, query, sort]);
 
     return <div style={{ padding: "20px 16px 80px" }}>
-        <h1 style={{
-            margin: "8px 0 4px",
-            fontSize: 22,
+        <div style={{
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
+            margin: "8px 0 4px",
             gap: 10
         }}>
-            <LibraryIcon size={22} style={{ color: "var(--accent)" }} />
-            My library
-        </h1>
+            <h1 style={{
+                margin: 0,
+                fontSize: 22,
+                display: "flex",
+                alignItems: "center",
+                gap: 10
+            }}>
+                <LibraryIcon size={22} style={{ color: "var(--accent)" }} />
+                My library
+            </h1>
+
+            {games.length > 0 && <button
+                onClick={() => useAppStore.getState().setScreen("stats")}
+                aria-label="View insights"
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "8px 12px",
+                    borderRadius: "var(--r-md)",
+                    background: "var(--accent-soft)",
+                    border: "1px solid var(--accent)",
+                    color: "var(--accent)",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    flexShrink: 0
+                }}
+            >
+                <BarChart3 size={15} /> Insights
+            </button>}
+        </div>
         <p style={{
             margin: "0 0 16px",
             color: "var(--text-dim)",

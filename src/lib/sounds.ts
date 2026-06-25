@@ -1,8 +1,13 @@
 import { Move } from "chess.js";
 
+import { getToggle } from "./settings";
+
 const cache: Record<string, HTMLAudioElement> = {};
 
 function play(name: string) {
+    // Respect the user's sound preference.
+    if (!getToggle("sounds")) return;
+
     try {
         cache[name] ??= new Audio(`/audio/${name}.mp3`);
         cache[name].currentTime = 0;

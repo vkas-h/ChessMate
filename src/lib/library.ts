@@ -29,8 +29,11 @@ export interface SavedGameSummary {
     white: string;
     black: string;
     whiteResult: string;
+    blackResult: string;
     accuracies?: { white: number; black: number };
     date?: string;
+    timeControl?: string;
+    opening?: string;
 }
 
 export class StorageQuotaError extends Error {
@@ -66,6 +69,19 @@ function gameHash(game: AnalysedGame): string {
     return (hash >>> 0).toString(36);
 }
 
+/** Deepest opening name along the serialized mainline (priority child). */
+function extractOpening(node: SerializedStateTreeNode): string | undefined {
+    let name: string | undefined;
+    let current: SerializedStateTreeNode | undefined = node;
+
+    while (current) {
+        if (current.state.opening) name = current.state.opening;
+        current = current.children.find(c => c.mainline) || current.children[0];
+    }
+
+    return name;
+}
+
 function buildSummary(record: SavedGameRecord): SavedGameSummary {
     return {
         id: record.id,
@@ -74,8 +90,11 @@ function buildSummary(record: SavedGameRecord): SavedGameSummary {
         white: record.game.players.white.username || "White",
         black: record.game.players.black.username || "Black",
         whiteResult: record.game.players.white.result,
+        blackResult: record.game.players.black.result,
         accuracies: record.accuracies,
-        date: record.game.date
+        date: record.game.date,
+        timeControl: record.game.timeControl,
+        opening: extractOpening(record.game.stateTree)
     };
 }
 
@@ -142,18 +161,27 @@ export async function listGames(): Promise<SavedGameSummary[]> {
     );
 
     const summaries: SavedGameSummary[] = [];
+    let needsRefresh = false;
 
     for (const key of allKeys) {
         try {
             const summary = await get<SavedGameSummary>(key);
-            if (summary?.white) summaries.push(summary);
+            if (!summary?.white) continue;
+
+            // Older summaries predate the stats fields — flag for refresh.
+            if (summary.blackResult == undefined) needsRefresh = true;
+
+            summaries.push(summary);
         } catch { /* skip corrupt */ }
     }
 
-    // Back-compat: migrate any pre-summary records on the fly.
-    if (summaries.length == 0) {
-        const legacy = await migrateLegacySummaries();
-        summaries.push(...legacy);
+    // Back-compat: build summaries from full records if none exist, OR
+    // refresh them if they're an older shape missing stats fields.
+    if (summaries.length == 0 || needsRefresh) {
+        const rebuilt = await migrateLegacySummaries();
+        if (rebuilt.length > 0) return rebuilt.sort(
+            (a, b) => b.savedAt.localeCompare(a.savedAt)
+        );
     }
 
     return summaries.sort(

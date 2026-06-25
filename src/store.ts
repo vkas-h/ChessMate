@@ -12,7 +12,7 @@ import Game from "@/types/game/Game";
 import { AnalysisProgress } from "./engine/analyse";
 import { playMoveSound } from "./lib/sounds";
 
-export type Screen = "home" | "analysis" | "library";
+export type Screen = "home" | "analysis" | "library" | "settings" | "stats";
 
 /* ------------------- history / back-button sync -------------------
  * "home" is the root entry. Drill-downs (loading a game) PUSH an
@@ -236,7 +236,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             try { window.history.back(); } catch { /* ignore */ }
         }
 
-        if (screen == "home") {
+        if (screen == "settings" || screen == "stats") {
+            // Drill-down screens (gear / insights): push so Back returns
+            // to wherever you were.
+            pushEntry(screen);
+        } else if (screen == "home") {
             // Going to root: replace, depth stays
             replaceEntry(screen);
         } else if (current == "home") {
