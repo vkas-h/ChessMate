@@ -12,21 +12,21 @@ export interface PresetConfig {
 export const presets: Record<AnalysisPreset, PresetConfig> = {
     quick: {
         label: "Quick",
-        description: "Depth 12 · fastest",
+        description: "D12 · 2s cap/pos",
         depth: 12,
         timeLimit: 2000,
         useCloud: true
     },
     balanced: {
         label: "Balanced",
-        description: "Depth 16 · recommended",
+        description: "D16 · 5s cap/pos",
         depth: 16,
         timeLimit: 5000,
         useCloud: true
     },
     deep: {
         label: "Deep",
-        description: "Depth 20 · strictest",
+        description: "D20 · 12s cap/pos",
         depth: 20,
         timeLimit: 12000,
         useCloud: true

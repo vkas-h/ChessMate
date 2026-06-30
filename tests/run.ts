@@ -70,7 +70,11 @@ test("undefined eval is neutral", () => {
 });
 
 /* ---------------------- evalCache normalise ---------------------- */
-import { normaliseFen } from "../src/engine/evalCache";
+import {
+    normaliseFen,
+    putCachedLines,
+    getCachedLines
+} from "../src/engine/evalCache";
 
 test("normaliseFen drops move counters", () => {
     const a = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -82,6 +86,49 @@ test("normaliseFen keeps side to move distinct", () => {
     const w = "8/8/8/8/8/8/8/8 w - - 0 1";
     const b = "8/8/8/8/8/8/8/8 b - - 0 1";
     assert(normaliseFen(w) != normaliseFen(b), "side to move matters");
+});
+
+/* ---------------------- engine line merge ---------------------- */
+import {
+    EngineLine,
+    mergeEngineLines
+} from "../src/core/types/game/position/EngineLine";
+import EngineVersion from "../src/core/constants/EngineVersion";
+
+function fakeLine(depth: number, index: number, value: number): EngineLine {
+    return {
+        depth,
+        index,
+        source: EngineVersion.STOCKFISH_17_LITE,
+        evaluation: { type: "centipawn", value },
+        moves: [{ san: "e4", uci: "e2e4" }]
+    };
+}
+
+test("mergeEngineLines replaces duplicate source/depth/index", () => {
+    const lines = [fakeLine(12, 1, 20)];
+    mergeEngineLines(lines, [fakeLine(12, 1, 30)]);
+
+    assert(lines.length == 1, `expected 1 line, got ${lines.length}`);
+    assert(lines[0].evaluation.value == 30, "duplicate line should be updated");
+});
+
+test("mergeEngineLines keeps different multipv lines", () => {
+    const lines = [fakeLine(12, 1, 20)];
+    mergeEngineLines(lines, [fakeLine(12, 2, 10)]);
+
+    assert(lines.length == 2, `expected 2 lines, got ${lines.length}`);
+});
+
+test("eval cache can require a minimum line count", () => {
+    const fen = "8/8/8/8/8/8/8/8 w - - 0 1";
+
+    putCachedLines(fen, [fakeLine(14, 1, 10)]);
+    assert(getCachedLines(fen, 12, 1), "one line should qualify for minCount 1");
+    assert(!getCachedLines(fen, 12, 2), "one line should not qualify for minCount 2");
+
+    putCachedLines(fen, [fakeLine(14, 1, 10), fakeLine(14, 2, 8)]);
+    assert(getCachedLines(fen, 12, 2), "two lines should qualify for minCount 2");
 });
 
 /* ---------------------- summary / hash dedupe ---------------------- */

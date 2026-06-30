@@ -230,3 +230,61 @@ export async function deleteGame(id: string) {
     await del(GAME_PREFIX + id);
     await del(SUMMARY_PREFIX + id);
 }
+
+export async function getLibraryStats(): Promise<{ games: number }> {
+    return { games: (await listGames()).length };
+}
+
+export interface LibraryBackup {
+    version: 1;
+    exportedAt: string;
+    records: SavedGameRecord[];
+}
+
+export async function exportLibrary(): Promise<LibraryBackup> {
+    const gameKeys = (await keys()).filter(
+        key => typeof key == "string" && key.startsWith(GAME_PREFIX)
+    ) as string[];
+
+    const records: SavedGameRecord[] = [];
+    for (const key of gameKeys) {
+        try {
+            const record = await get<SavedGameRecord>(key);
+            if (record?.id && record.game?.players) records.push(record);
+        } catch { /* skip corrupt */ }
+    }
+
+    return {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        records
+    };
+}
+
+export async function importLibrary(backup: LibraryBackup): Promise<number> {
+    if (backup.version != 1 || !Array.isArray(backup.records)) {
+        throw new Error("Unsupported ChessMate backup file.");
+    }
+
+    let imported = 0;
+    for (const record of backup.records) {
+        if (!record?.id || !record.game?.players || !record.game?.stateTree) {
+            continue;
+        }
+
+        await set(GAME_PREFIX + record.id, record);
+        await set(SUMMARY_PREFIX + record.id, buildSummary(record));
+        imported++;
+    }
+
+    return imported;
+}
+
+export async function clearLibrary(): Promise<void> {
+    const allKeys = (await keys()).filter(key =>
+        typeof key == "string"
+        && (key.startsWith(GAME_PREFIX) || key.startsWith(SUMMARY_PREFIX))
+    ) as string[];
+
+    await Promise.all(allKeys.map(key => del(key)));
+}

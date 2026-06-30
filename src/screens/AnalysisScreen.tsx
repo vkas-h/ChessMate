@@ -1,10 +1,10 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
     SkipBack, ChevronLeft, ChevronRight, SkipForward,
     FlipVertical2, Play, Pause, Share2, Zap, BarChart3, List
 } from "lucide-react";
 import { Chessboard } from "react-chessboard";
-import { Chess, Move } from "chess.js";
+import { Chess } from "chess.js";
 
 import PieceColour from "@/constants/PieceColour";
 import { Classification } from "@/constants/Classification";
@@ -12,9 +12,6 @@ import { getTopEngineLine } from "@/types/game/position/EngineLine";
 
 import { useAppStore } from "../store";
 import { countClassifications } from "../engine/analyse";
-import { realtimeAnalyser } from "../engine/realtime";
-import { enginePool } from "../engine/enginePool";
-import { hydrateEvalCache } from "../engine/evalCache";
 import { useAnalysisRunner } from "./useAnalysisRunner";
 import GameReport from "./GameReport";
 import { AnalysisPreset, presets } from "../engine/presets";
@@ -28,16 +25,20 @@ import MoveStrip from "../components/MoveStrip";
 import EngineLines from "../components/EngineLines";
 import ShareDialog from "../components/ShareDialog";
 import FullMoveList from "../components/FullMoveList";
-
-type ArrowMode = "off" | "continuation" | "alternative";
-
-const arrowModeLabels: Record<ArrowMode, string> = {
-    off: "Arrow: off",
-    continuation: "Arrow: best now",
-    alternative: "Arrow: best instead"
-};
-
-const ARROW_STORAGE_KEY = "chessmate:arrowMode";
+import NavButton from "./analysis/NavButton";
+import PlayerRow from "./analysis/PlayerRow";
+import PromotionDialog from "./analysis/PromotionDialog";
+import {
+    arrowModeLabels,
+    useArrowMode,
+    useAutoplay,
+    useBestMoveArrow,
+    useBoardInteraction,
+    useBoardSizing,
+    useKeyboardNavigation,
+    useRealtimeAnalysis,
+    useWarmAnalysisEngine
+} from "./analysis/hooks";
 
 function AnalysisScreen() {
     const {
@@ -49,36 +50,17 @@ function AnalysisScreen() {
 
     const node = currentNode;
 
-    // Realtime analysis: when landing on a position with no evals
-    // (e.g. a move the user just played), evaluate + classify it in
-    // the background so the eval bar and badge come alive.
-    useEffect(() => {
-        if (analysing || !gameLoaded) return;
+    useRealtimeAnalysis(node, analysing, gameLoaded, bumpTreeVersion);
+    useWarmAnalysisEngine();
 
-        if (
-            realtimeAnalyser.needsEvaluation(node)
-            || (node.state.move && !node.state.classification
-                && node.parent)
-        ) {
-            void realtimeAnalyser.analyseNode(node, {
-                onUpdate: bumpTreeVersion
-            });
-        }
-
-        return () => realtimeAnalyser.cancel();
-    }, [node, analysing, gameLoaded, bumpTreeVersion]);
-
-    const [boardWidth, setBoardWidth] = useState(360);
-    const [promotion, setPromotion] = useState<
-        { from: string; to: string } | null
-    >(null);
+    const { boardAreaRef, boardWidth } = useBoardSizing();
 
     // Analysis lifecycle (run/cancel/save/preset/errors) lives in a hook.
     const analysis = useAnalysisRunner(game, treeVersion);
     const {
         preset, choosePreset,
         error: analysisError, setError: setAnalysisError,
-        depthWarning, saved
+        depthWarning, saved, cancelling
     } = analysis;
 
     const shareOpen = useAppStore(state => state.shareOpen);
@@ -86,373 +68,58 @@ function AnalysisScreen() {
     const analysisView = useAppStore(state => state.analysisView);
     const setAnalysisView = useAppStore(state => state.setAnalysisView);
     const [fullMoveList, setFullMoveList] = useState(false);
-    const [autoplay, setAutoplay] = useState(false);
-
-    const [arrowMode, setArrowMode] = useState<ArrowMode>(() => {
-        const stored = localStorage.getItem(ARROW_STORAGE_KEY);
-
-        return (
-            stored == "off"
-            || stored == "continuation"
-            || stored == "alternative"
-        ) ? stored : "alternative";
-    });
-
-    function cycleArrowMode() {
-        const order: ArrowMode[] = ["alternative", "continuation", "off"];
-        const next = order[(order.indexOf(arrowMode) + 1) % order.length];
-
-        setArrowMode(next);
-        localStorage.setItem(ARROW_STORAGE_KEY, next);
-    }
-
-    const boardAreaRef = useRef<HTMLDivElement | null>(null);
+    const { arrowMode, cycleArrowMode } = useArrowMode();
+    const { autoplay, setAutoplay } = useAutoplay(node);
 
     // Revert the "Saved" badge if the tree changed after a save.
     useEffect(() => {
         analysis.checkStale();
     }, [treeVersion]);
 
-    // Warm the shared engine + eval cache as soon as the analysis
-    // screen is open, so the first evaluation isn't a cold WASM start.
-    useEffect(() => {
-        void hydrateEvalCache();
-        enginePool.warm();
-    }, []);
-
-    useEffect(() => {
-        function updateWidth() {
-            const el = boardAreaRef.current;
-            if (!el) return;
-            setBoardWidth(Math.min(el.clientWidth - 34, 520));
-        }
-
-        updateWidth();
-        window.addEventListener("resize", updateWidth);
-        return () => window.removeEventListener("resize", updateWidth);
-    }, []);
-
-    // Swipe + key navigation
-    useEffect(() => {
-        function onKey(event: KeyboardEvent) {
-            if (event.key == "ArrowRight") stepForward();
-            if (event.key == "ArrowLeft") stepBackward();
-        }
-
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [stepForward, stepBackward]);
-
-    // Set true for the single node-change that autoplay itself causes,
-    // so the cancel-on-manual-navigation effect can tell them apart.
-    const autoplayStepRef = useRef(false);
-
-    // Autoplay: step forward every 1.2s until the line ends
-    useEffect(() => {
-        if (!autoplay) return;
-
-        const interval = setInterval(() => {
-            const state = useAppStore.getState();
-            const before = state.currentNode;
-
-            autoplayStepRef.current = true;
-            state.stepForward();
-
-            // Reached the end of the line: stop
-            if (useAppStore.getState().currentNode == before) {
-                autoplayStepRef.current = false;
-                setAutoplay(false);
-            }
-        }, 1200);
-
-        return () => clearInterval(interval);
-    }, [autoplay]);
-
-    // Any MANUAL navigation cancels autoplay. This fires on every
-    // position change (taps on moves/graph/engine lines, swipes, keys);
-    // we ignore only the change autoplay made itself.
-    useEffect(() => {
-        if (autoplayStepRef.current) {
-            autoplayStepRef.current = false;
-            return;
-        }
-        setAutoplay(false);
-    }, [node]);
+    useKeyboardNavigation(stepForward, stepBackward);
 
     const topLine = getTopEngineLine(node.state.engineLines);
     const evaluation = topLine?.evaluation;
 
-    // The engine's best move in the PREVIOUS position (what should
-    // have been played instead of the actual move)
-    const bestAlternative = useMemo(() => {
-        if (!node.parent) return undefined;
-
-        const parentTop = getTopEngineLine(node.parent.state.engineLines);
-        const bestMove = parentTop?.moves.at(0);
-        if (!bestMove) return undefined;
-
-        // Don't suggest the move that was actually played
-        if (bestMove.san == node.state.move?.san) return undefined;
-
-        return bestMove;
-    }, [node, treeVersion]);
-
-    // Suggestion arrow on the board
-    const arrows = useMemo((): [string, string, string?][] => {
-        const arrowColour = classificationColours[Classification.BEST];
-
-        if (arrowMode == "continuation") {
-            const uci = topLine?.moves.at(0)?.uci;
-            if (!uci) return [];
-
-            return [[uci.slice(0, 2), uci.slice(2, 4), arrowColour]];
-        }
-
-        if (arrowMode == "alternative") {
-            if (!bestAlternative) return [];
-
-            const uci = bestAlternative.uci;
-            return [[uci.slice(0, 2), uci.slice(2, 4), arrowColour]];
-        }
-
-        return [];
-    }, [arrowMode, topLine, bestAlternative, treeVersion]);
-
-    // Tapping "X was the best move" plays it as a variation
-    function exploreBestAlternative() {
-        if (!bestAlternative || !node.parent) return;
-
-        try {
-            const move = new Chess(node.parent.state.fen)
-                .move(bestAlternative.san);
-
-            const { goToNode } = useAppStore.getState();
-
-            // Walk back to the parent, then add/enter the best move
-            goToNode(node.parent, true);
-            addMove(move);
-        } catch {
-            // ignore malformed moves
-        }
-    }
+    const { bestAlternative, arrows, exploreBestAlternative } =
+        useBestMoveArrow({ node, topLine, arrowMode, treeVersion, addMove });
 
     const classifCounts = useMemo(
         () => analysed ? countClassifications(game.stateTree) : null,
         [analysed, game.stateTree, treeVersion]
     );
 
-    const lastMove = useMemo(() => {
-        if (!node.state.move || !node.parent) return undefined;
-
-        try {
-            return new Chess(node.parent.state.fen)
-                .move(node.state.move.san);
-        } catch {
-            return undefined;
-        }
-    }, [node]);
-
-    const lastMoveSquares = useMemo(() => {
-        if (!lastMove) return {};
-
-        const colour = node.state.classification
-            ? classificationColours[node.state.classification] + "66"
-            : "rgba(0, 122, 255, 0.4)";
-
-        return {
-            [lastMove.from]: { backgroundColor: colour },
-            [lastMove.to]: { backgroundColor: colour }
-        };
-    }, [lastMove, node]);
-
-    // -------- Tap-to-move with legal move dots (chess.com style) ----
-
-    const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
-
-    // Clear selection whenever the position changes
-    useEffect(() => setSelectedSquare(null), [node]);
-
-    const legalTargets = useMemo(() => {
-        if (!selectedSquare) return new Map<string, boolean>();
-
-        try {
-            const board = new Chess(node.state.fen);
-            const moves = board.moves({
-                square: selectedSquare as any,
-                verbose: true
-            });
-
-            // square -> isCapture
-            return new Map(moves.map(move => [
-                move.to as string,
-                move.isCapture() || move.isEnPassant()
-            ]));
-        } catch {
-            return new Map<string, boolean>();
-        }
-    }, [selectedSquare, node]);
-
-    const tapSquareStyles = useMemo(() => {
-        const styles: Record<string, React.CSSProperties> = {};
-
-        if (!selectedSquare) return styles;
-
-        // Highlight the selected piece's square
-        styles[selectedSquare] = {
-            backgroundColor: "rgba(0, 122, 255, 0.5)"
-        };
-
-        // Dots on legal destinations; rings on captures
-        for (const [square, isCapture] of legalTargets) {
-            styles[square] = isCapture
-                ? {
-                    background:
-                        "radial-gradient(circle, transparent 56%, "
-                        + "rgba(40, 30, 16, 0.35) 57%)"
-                }
-                : {
-                    background:
-                        "radial-gradient(circle, "
-                        + "rgba(40, 30, 16, 0.35) 27%, transparent 28%)"
-                };
-        }
-
-        return styles;
-    }, [selectedSquare, legalTargets]);
-
-    const squareStyles = useMemo(
-        () => ({ ...lastMoveSquares, ...tapSquareStyles }),
-        [lastMoveSquares, tapSquareStyles]
-    );
-
-    /**
-     * Is from->to a LEGAL promoting move in the current position?
-     * Used for click-to-move (our own picker) and for the board's
-     * native drag promotion dialog (onPromotionCheck). Crucially this
-     * is legality-aware, so it never fires for illegal drags or when
-     * it isn't that side's turn.
-     */
-    function isPromotion(from: string, to: string) {
-        try {
-            return new Chess(node.state.fen)
-                .moves({ square: from as any, verbose: true })
-                .some(move => move.to == to && Boolean(move.promotion));
-        } catch {
-            return false;
-        }
-    }
-
-    /** Play from->to (optionally with a chosen promotion piece). */
-    function commitMove(
-        from: string,
-        to: string,
-        promotionPiece: "q" | "r" | "b" | "n"
-    ) {
-        try {
-            const move: Move = new Chess(node.state.fen).move({
-                from, to, promotion: promotionPiece
-            });
-
-            setSelectedSquare(null);
-            addMove(move);
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    /**
-     * Tap-to-move entry point. For a legal promotion it opens OUR picker
-     * (the board's native dialog only covers drag-and-drop); otherwise
-     * it plays the move directly.
-     */
-    function tryMove(from: string, to: string) {
-        if (isPromotion(from, to)) {
-            setSelectedSquare(null);
-            setPromotion({ from, to });
-            return true;
-        }
-        return commitMove(from, to, "q");
-    }
-
-    function completePromotion(piece: "q" | "r" | "b" | "n") {
-        if (!promotion) return;
-        const { from, to } = promotion;
-        setPromotion(null);
-        commitMove(from, to, piece);
-    }
-
-    function onSquareClick(square: string) {
-        // Tapping a legal destination: play the move
-        if (selectedSquare && legalTargets.has(square)) {
-            tryMove(selectedSquare, square);
-            return;
-        }
-
-        // Tapping the selected piece again: deselect
-        if (square == selectedSquare) {
-            setSelectedSquare(null);
-            return;
-        }
-
-        // Tapping one of own pieces: select it (whoever's turn it is)
-        try {
-            const board = new Chess(node.state.fen);
-            const piece = board.get(square as any);
-
-            if (piece && piece.color == board.turn()) {
-                setSelectedSquare(square);
-                return;
-            }
-        } catch { /* ignore */ }
-
-        // Tapping anything else: clear selection
-        setSelectedSquare(null);
-    }
-
-    // Position of the classification badge: pinned to the corner of
-    // the move's destination square.
-    const badgePosition = useMemo(() => {
-        if (!lastMove) return undefined;
-
-        const file = lastMove.to.charCodeAt(0) - 97; // a-h -> 0-7
-        const rank = parseInt(lastMove.to[1]) - 1;   // 1-8 -> 0-7
-
-        const squareSize = boardWidth / 8;
-
-        const x = flipped ? 7 - file : file;
-        const y = flipped ? rank : 7 - rank;
-
-        return {
-            left: (x + 1) * squareSize - 13,
-            top: y * squareSize - 9
-        };
-    }, [lastMove, boardWidth, flipped]);
+    const {
+        promotion,
+        setPromotion,
+        completePromotion,
+        onPieceDrop,
+        onPromotionCheck,
+        onSquareClick,
+        onPieceDragBegin,
+        squareStyles,
+        badgePosition
+    } = useBoardInteraction({ node, boardWidth, flipped, addMove });
 
     const startAnalysis = analysis.start;
     const onSave = analysis.save;
 
-    function onPieceDrop(from: string, to: string) {
-        // Drag promotions use OUR dark-themed picker, not the library's
-        // white modal. We open it here and return true so the board
-        // doesn't snap the pawn back; the actual move is committed when
-        // the user picks a piece (completePromotion).
-        if (isPromotion(from, to)) {
-            setPromotion({ from, to });
-            return true;
-        }
+    const analysisStageLabel = (() => {
+        if (!analysing) return "";
+        if (cancelling) return "Cancelling…";
 
-        return commitMove(from, to, "q");
-    }
+        const done = analysisProgress?.done ?? 0;
+        const total = analysisProgress?.total ?? 0;
+        const count = total > 0 ? ` ${done}/${total}` : "";
 
-    /**
-     * Always return false so react-chessboard NEVER opens its own
-     * (white, off-theme) promotion dialog. Drag promotions are handled
-     * by onPieceDrop -> our custom picker instead.
-     */
-    function onPromotionCheck() {
-        return false;
-    }
+        if (analysisProgress?.stage == "preparing") return "Preparing…";
+        if (analysisProgress?.stage == "cloud") return `Checking cloud${count}…`;
+        if (analysisProgress?.stage == "classifying") return "Classifying moves…";
+
+        return `Analysing${count} · ${Math.round(
+            (analysisProgress?.progress || 0) * 100
+        )}%`;
+    })();
 
     const whiteName = game.players.white.username || "White";
     const blackName = game.players.black.username || "Black";
@@ -576,17 +243,7 @@ function AnalysisScreen() {
                     onPromotionCheck={onPromotionCheck as any}
                     autoPromoteToQueen={false}
                     onSquareClick={onSquareClick as any}
-                    onPieceDragBegin={(_piece, square) => {
-                        // Dragging also shows the dots
-                        try {
-                            const board = new Chess(node.state.fen);
-                            const piece = board.get(square as any);
-
-                            if (piece && piece.color == board.turn()) {
-                                setSelectedSquare(square as string);
-                            }
-                        } catch { /* ignore */ }
-                    }}
+                    onPieceDragBegin={onPieceDragBegin as any}
                     customSquareStyles={squareStyles}
                     customArrows={arrows as any}
                     customDarkSquareStyle={{ backgroundColor: "var(--board-dark)" }}
@@ -914,20 +571,14 @@ function AnalysisScreen() {
 
             <span style={{ position: "relative" }}>
                 {analysing
-                    ? (analysisProgress?.stage == "preparing"
-                        ? "Preparing…"
-                        : analysisProgress?.stage == "classifying"
-                            ? "Classifying…"
-                            : `Analysing... ${Math.round(
-                                (analysisProgress?.progress || 0) * 100
-                            )}%`)
+                    ? analysisStageLabel
                     + ((analysisProgress?.cloudHits || 0) > 0
                         ? ` · ☁ ${analysisProgress?.cloudHits}`
                         : "")
                     + ((analysisProgress?.cacheHits || 0) > 0
                         ? ` · ⚡${analysisProgress?.cacheHits}`
                         : "")
-                    + " (tap to cancel)"
+                    + (cancelling ? "" : " (tap to cancel)")
                     : analysed
                         ? "Re-analyse game"
                         : <><Zap size={16} style={{
@@ -1010,129 +661,6 @@ function AnalysisScreen() {
 function aOrAn(classification: Classification) {
     return ["excellent", "inaccuracy", "okay"].includes(classification)
         ? "an" : "a";
-}
-
-function PlayerRow(props: {
-    name: string;
-    rating?: number;
-    accuracy?: number;
-}) {
-    return <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "2px 2px"
-    }}>
-        <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>
-            {props.name}
-        </span>
-
-        {props.rating && <span style={{
-            color: "var(--text-dim)",
-            fontSize: "0.8rem"
-        }}>
-            ({props.rating})
-        </span>}
-
-        {props.accuracy != undefined && !isNaN(props.accuracy) && <span style={{
-            marginLeft: "auto",
-            background: "var(--surface-2)",
-            color: "var(--text)",
-            fontWeight: 800,
-            fontSize: 12,
-            borderRadius: 6,
-            padding: "2px 8px",
-            border: "1px solid var(--line-strong)"
-        }}>
-            {props.accuracy.toFixed(1)}%
-        </span>}
-    </div>;
-}
-
-function NavButton(props: {
-    icon: React.ReactNode;
-    onClick: () => void;
-    grow?: boolean;
-    label?: string;
-}) {
-    return <button
-        onClick={props.onClick}
-        aria-label={props.label}
-        title={props.label}
-        style={{
-            flex: props.grow ? 2 : 1,
-            padding: "11px 0",
-            borderRadius: "var(--r-sm)",
-            background: "var(--surface-2)",
-            color: "var(--text)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-        }}
-    >
-        {props.icon}
-    </button>;
-}
-
-const PROMO_GLYPHS: Record<string, Record<string, string>> = {
-    w: { q: "♕", r: "♖", b: "♗", n: "♘" },
-    b: { q: "♛", r: "♜", b: "♝", n: "♞" }
-};
-
-function PromotionDialog(props: {
-    colour: "w" | "b";
-    onPick: (piece: "q" | "r" | "b" | "n") => void;
-    onCancel: () => void;
-}) {
-    const pieces: ("q" | "r" | "b" | "n")[] = ["q", "r", "b", "n"];
-
-    return <div
-        onClick={props.onCancel}
-        style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            zIndex: 120,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-        }}
-    >
-        <div
-            onClick={event => event.stopPropagation()}
-            role="dialog"
-            aria-label="Choose promotion piece"
-            style={{
-                background: "var(--surface-1)",
-                border: "1px solid var(--line)",
-                borderRadius: "var(--r-lg)",
-                padding: 16,
-                display: "flex",
-                gap: 10
-            }}
-        >
-            {pieces.map(piece => <button
-                key={piece}
-                onClick={() => props.onPick(piece)}
-                aria-label={{
-                    q: "Queen", r: "Rook", b: "Bishop", n: "Knight"
-                }[piece]}
-                style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: "var(--r-md)",
-                    background: "var(--surface-2)",
-                    border: "1px solid var(--line)",
-                    fontSize: 34,
-                    lineHeight: 1,
-                    color: "var(--text)",
-                    cursor: "pointer"
-                }}
-            >
-                {PROMO_GLYPHS[props.colour][piece]}
-            </button>)}
-        </div>
-    </div>;
 }
 
 export default AnalysisScreen;

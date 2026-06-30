@@ -12,10 +12,17 @@ import {
 import {
     AnalysisPreset, presets, loadPreset, savePreset
 } from "../engine/presets";
-import { clearEvalCache } from "../engine/evalCache";
+import { clearEvalCache, getEvalCacheStats } from "../engine/evalCache";
+import {
+    clearLibrary,
+    exportLibrary,
+    getLibraryStats,
+    importLibrary,
+    LibraryBackup
+} from "../lib/library";
 import { checkForUpdate } from "../lib/updates";
 
-const APP_VERSION = "1.1";
+const APP_VERSION = __APP_VERSION__.replace(/\.0$/, "");
 
 function SettingsScreen() {
     const setScreen = useAppStore(state => state.setScreen);
@@ -24,7 +31,25 @@ function SettingsScreen() {
     const [liUser, setLiUser] = useState(getUsername("lichess"));
     const [preset, setPreset] = useState<AnalysisPreset>(loadPreset);
     const [cacheCleared, setCacheCleared] = useState(false);
+    const [libraryCleared, setLibraryCleared] = useState(false);
+    const [confirmClearLibrary, setConfirmClearLibrary] = useState(false);
+    const [cacheEntries, setCacheEntries] = useState<number | null>(null);
+    const [savedGames, setSavedGames] = useState<number | null>(null);
+    const [backupMsg, setBackupMsg] = useState("");
     const [updateMsg, setUpdateMsg] = useState("");
+
+    async function refreshStorageStats() {
+        const [cache, library] = await Promise.all([
+            getEvalCacheStats(),
+            getLibraryStats()
+        ]);
+        setCacheEntries(cache.entries);
+        setSavedGames(library.games);
+    }
+
+    useEffect(() => {
+        void refreshStorageStats();
+    }, []);
 
     async function onCheckNow() {
         setUpdateMsg("Checking…");
@@ -49,8 +74,59 @@ function SettingsScreen() {
 
     async function onClearCache() {
         await clearEvalCache();
+        await refreshStorageStats();
         setCacheCleared(true);
         setTimeout(() => setCacheCleared(false), 2000);
+    }
+
+    async function onClearLibrary() {
+        if (!confirmClearLibrary) {
+            setConfirmClearLibrary(true);
+            setTimeout(() => setConfirmClearLibrary(false), 3500);
+            return;
+        }
+
+        await clearLibrary();
+        await refreshStorageStats();
+        setConfirmClearLibrary(false);
+        setLibraryCleared(true);
+        setTimeout(() => setLibraryCleared(false), 2000);
+    }
+
+    async function onExportLibrary() {
+        const backup = await exportLibrary();
+        if (backup.records.length == 0) {
+            setBackupMsg("No saved games to export.");
+            setTimeout(() => setBackupMsg(""), 2500);
+            return;
+        }
+
+        const blob = new Blob([JSON.stringify(backup, null, 2)], {
+            type: "application/json"
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `chessmate-library-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+
+        setBackupMsg(`Exported ${backup.records.length} game${backup.records.length == 1 ? "" : "s"}.`);
+        setTimeout(() => setBackupMsg(""), 2500);
+    }
+
+    async function onImportLibrary(file: File) {
+        try {
+            const backup = JSON.parse(await file.text()) as LibraryBackup;
+            const count = await importLibrary(backup);
+            await refreshStorageStats();
+            setBackupMsg(`Imported ${count} game${count == 1 ? "" : "s"}.`);
+        } catch (err) {
+            setBackupMsg(
+                err instanceof Error ? err.message : "Could not import backup."
+            );
+        }
+        setTimeout(() => setBackupMsg(""), 3000);
     }
 
     return <div style={{ padding: "16px 16px 96px" }}>
@@ -146,27 +222,75 @@ function SettingsScreen() {
                 settingKey="sounds"
             />
 
+        </Section>
+
+        {/* Storage */}
+        <Section title="STORAGE" icon={<Trash2 size={14} />}>
+            <Row
+                label="Saved games"
+                value={savedGames == null ? "Loading…" : String(savedGames)}
+            />
+            <Row
+                label="Evaluation cache"
+                value={cacheEntries == null
+                    ? "Loading…"
+                    : `${cacheEntries} position${cacheEntries == 1 ? "" : "s"}`}
+            />
+
+            <button
+                onClick={() => void onExportLibrary()}
+                style={neutralButtonStyle}
+            >
+                <Save size={15} />
+                Export saved games
+            </button>
+
+            <label style={neutralButtonStyle}>
+                <Save size={15} />
+                Import saved games
+                <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={event => {
+                        const file = event.target.files?.[0];
+                        if (file) void onImportLibrary(file);
+                        event.currentTarget.value = "";
+                    }}
+                    style={{ display: "none" }}
+                />
+            </label>
+
+            {backupMsg && <Hint>{backupMsg}</Hint>}
+
             <button
                 onClick={() => void onClearCache()}
-                style={{
-                    width: "100%",
-                    marginTop: 10,
-                    padding: "11px 0",
-                    borderRadius: "var(--r-md)",
-                    background: "var(--surface-2)",
-                    border: "1px solid var(--line)",
-                    color: cacheCleared ? "var(--good)" : "var(--text-dim)",
-                    fontWeight: 700,
-                    fontSize: 13,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8
-                }}
+                style={dangerButtonStyle(cacheCleared)}
             >
                 <Trash2 size={15} />
                 {cacheCleared ? "Cache cleared" : "Clear evaluation cache"}
             </button>
+
+            <button
+                onClick={() => void onClearLibrary()}
+                style={{
+                    ...dangerButtonStyle(libraryCleared || confirmClearLibrary),
+                    color: libraryCleared
+                        ? "var(--good)"
+                        : confirmClearLibrary ? "var(--bad)" : "var(--text-dim)"
+                }}
+            >
+                <Trash2 size={15} />
+                {libraryCleared
+                    ? "Library cleared"
+                    : confirmClearLibrary
+                        ? "Tap again to delete all saved games"
+                        : "Clear saved games"}
+            </button>
+            <Hint>
+                Clearing the evaluation cache only removes reusable engine
+                results. Clearing saved games permanently deletes your library
+                from this device.
+            </Hint>
         </Section>
 
         {/* Updates */}
@@ -346,6 +470,41 @@ function Row(props: { label: string; value: string }) {
         <span style={{ fontWeight: 600 }}>{props.label}</span>
         <span style={{ color: "var(--text-dim)" }}>{props.value}</span>
     </div>;
+}
+
+const neutralButtonStyle: React.CSSProperties = {
+    width: "100%",
+    marginTop: 10,
+    padding: "11px 0",
+    borderRadius: "var(--r-md)",
+    background: "var(--surface-2)",
+    border: "1px solid var(--line)",
+    color: "var(--text-dim)",
+    fontWeight: 700,
+    fontSize: 13,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    cursor: "pointer"
+};
+
+function dangerButtonStyle(success = false): React.CSSProperties {
+    return {
+        width: "100%",
+        marginTop: 10,
+        padding: "11px 0",
+        borderRadius: "var(--r-md)",
+        background: "var(--surface-2)",
+        border: "1px solid var(--line)",
+        color: success ? "var(--good)" : "var(--text-dim)",
+        fontWeight: 700,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8
+    };
 }
 
 function Hint(props: { children: React.ReactNode }) {

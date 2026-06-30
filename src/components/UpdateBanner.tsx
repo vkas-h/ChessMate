@@ -55,7 +55,7 @@ function UpdateBanner() {
     }}>
         <Download size={18} style={{ flexShrink: 0 }} />
         <a
-            href={info.url}
+            href={info.apkUrl || info.url}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -69,7 +69,7 @@ function UpdateBanner() {
                 Update available · {info.version}
             </div>
             <div style={{ fontSize: 11.5, opacity: 0.85 }}>
-                Tap to download the latest version
+                {info.apkUrl ? "Tap to download APK" : "Tap to view release"}
             </div>
         </a>
         <button

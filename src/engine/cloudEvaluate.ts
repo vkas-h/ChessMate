@@ -5,6 +5,8 @@ import Move from "@/types/game/position/Move";
 import EngineVersion from "@/constants/EngineVersion";
 import { lichessCastlingMoves } from "@/constants/utils";
 
+import { normaliseFen } from "./evalCache";
+
 /**
  * Fetch a Lichess cloud evaluation for a position. These are very deep
  * (usually depth 30+), so when available they're far more accurate than
@@ -14,10 +16,15 @@ import { lichessCastlingMoves } from "@/constants/utils";
 async function getCloudEvaluation(
     fen: string,
     targetCount = 2,
-    timeoutMs = 2500
+    timeoutMs = 2500,
+    signal?: AbortSignal
 ): Promise<EngineLine[]> {
+    if (signal?.aborted) throw new Error("aborted");
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromCaller = () => controller.abort();
+    signal?.addEventListener("abort", abortFromCaller, { once: true });
 
     let cloudEvaluation: any;
 
@@ -35,6 +42,7 @@ async function getCloudEvaluation(
         cloudEvaluation = await cloudResponse.json();
     } finally {
         clearTimeout(timeout);
+        signal?.removeEventListener("abort", abortFromCaller);
     }
 
     const engineLines: EngineLine[] = [];
@@ -90,21 +98,33 @@ async function getCloudEvaluation(
 export async function getCloudEvaluationsBatch(
     fens: string[],
     targetCount = 2,
-    concurrency = 5
+    concurrency = 5,
+    signal?: AbortSignal
 ): Promise<Map<string, EngineLine[]>> {
     const results = new Map<string, EngineLine[]>();
 
-    // De-duplicate so transpositions are only requested once.
-    const unique = [...new Set(fens)];
+    // De-duplicate transpositions and identical positions whose FENs only
+    // differ by halfmove/fullmove counters. Results are keyed by normalized
+    // FEN; callers should look up with normaliseFen(fen).
+    const representativeByKey = new Map<string, string>();
+    for (const fen of fens) {
+        representativeByKey.set(normaliseFen(fen), fen);
+    }
+
+    const unique = [...representativeByKey.entries()];
     let cursor = 0;
 
     async function worker() {
-        while (cursor < unique.length) {
-            const fen = unique[cursor++];
+        while (cursor < unique.length && !signal?.aborted) {
+            const [key, fen] = unique[cursor++];
             try {
-                results.set(fen, await getCloudEvaluation(fen, targetCount));
+                results.set(
+                    key,
+                    await getCloudEvaluation(fen, targetCount, 2500, signal)
+                );
             } catch {
-                // miss / failure -> leave absent
+                // miss / failure / abort -> leave absent
+                if (signal?.aborted) return;
             }
         }
     }

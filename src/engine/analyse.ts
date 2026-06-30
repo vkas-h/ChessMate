@@ -1,4 +1,5 @@
 import { getNodeChain, StateTreeNode } from "@/types/game/position/StateTreeNode";
+import { mergeEngineLines } from "@/types/game/position/EngineLine";
 import { getGameAnalysis } from "@/lib/reporter/report";
 import { getGameAccuracy } from "@/lib/reporter/accuracy";
 import AnalysedGame from "@/types/game/AnalysedGame";
@@ -9,13 +10,18 @@ import { getStrictGameAccuracy } from "./accuracy";
 import {
     hydrateEvalCache,
     getCachedLines,
-    putCachedLines
+    putCachedLines,
+    normaliseFen
 } from "./evalCache";
 
 export interface AnalysisProgress {
     /** 0 to 1 */
     progress: number;
-    stage: "preparing" | "evaluating" | "classifying" | "done";
+    stage: "preparing" | "cloud" | "evaluating" | "classifying" | "done";
+    /** positions evaluated/skipped so far */
+    done: number;
+    /** total positions in the mainline analysis pass */
+    total: number;
     /** how many positions were served by Lichess cloud (deep) evals */
     cloudHits: number;
     /** how many positions were served from the local eval cache */
@@ -73,7 +79,12 @@ export async function analyseGame(
     let consistentDepth = true;
 
     onProgress?.({
-        progress: 0, stage: "preparing", cloudHits, cacheHits
+        progress: 0,
+        stage: "preparing",
+        done: 0,
+        total: nodes.length,
+        cloudHits,
+        cacheHits
     });
 
     // ---- Pass 0: serve from the persistent cache ------------------
@@ -87,32 +98,50 @@ export async function analyseGame(
 
         const cached = getCachedLines(node.state.fen, depth);
         if (cached) {
-            node.state.engineLines.push(...cached);
+            mergeEngineLines(node.state.engineLines, cached);
             cacheHits++;
         } else {
             pending.push(node);
         }
     }
 
+    onProgress?.({
+        progress: (nodes.length - pending.length) / nodes.length,
+        stage: pending.length > 0 && useCloud ? "cloud" : "evaluating",
+        done: nodes.length - pending.length,
+        total: nodes.length,
+        cloudHits,
+        cacheHits
+    });
+
     if (signal?.aborted) throw new Error("aborted");
 
     // ---- Pass 1: PARALLEL cloud prefetch for the misses -----------
     if (useCloud && pending.length > 0) {
         const cloudMap = await getCloudEvaluationsBatch(
-            pending.map(node => node.state.fen), 2
+            pending.map(node => node.state.fen), 2, 5, signal
         );
 
         for (let i = pending.length - 1; i >= 0; i--) {
             const node = pending[i];
-            const lines = cloudMap.get(node.state.fen);
+            const lines = cloudMap.get(normaliseFen(node.state.fen));
             if (lines) {
-                node.state.engineLines.push(...lines);
+                mergeEngineLines(node.state.engineLines, lines);
                 putCachedLines(node.state.fen, lines);
                 cloudHits++;
                 pending.splice(i, 1);
             }
         }
     }
+
+    onProgress?.({
+        progress: (nodes.length - pending.length) / nodes.length,
+        stage: pending.length > 0 ? "evaluating" : "classifying",
+        done: nodes.length - pending.length,
+        total: nodes.length,
+        cloudHits,
+        cacheHits
+    });
 
     if (signal?.aborted) throw new Error("aborted");
 
@@ -136,7 +165,7 @@ export async function analyseGame(
                     mode: "depth"
                 });
 
-                node.state.engineLines.push(...lines);
+                mergeEngineLines(node.state.engineLines, lines);
                 putCachedLines(node.state.fen, lines);
 
                 if (engine.lastDepthReached < depth) consistentDepth = false;
@@ -145,6 +174,8 @@ export async function analyseGame(
                 onProgress?.({
                     progress: done / nodes.length,
                     stage: "evaluating",
+                    done,
+                    total: nodes.length,
                     cloudHits,
                     cacheHits
                 });
@@ -156,7 +187,12 @@ export async function analyseGame(
     }
 
     onProgress?.({
-        progress: 1, stage: "classifying", cloudHits, cacheHits
+        progress: 1,
+        stage: "classifying",
+        done: nodes.length,
+        total: nodes.length,
+        cloudHits,
+        cacheHits
     });
 
     // Run the WintrChess reporter (classifications + accuracy)
@@ -168,7 +204,14 @@ export async function analyseGame(
     const accuracies = getStrictGameAccuracy(game.stateTree)
         || getGameAccuracy(game.stateTree);
 
-    onProgress?.({ progress: 1, stage: "done", cloudHits, cacheHits });
+    onProgress?.({
+        progress: 1,
+        stage: "done",
+        done: nodes.length,
+        total: nodes.length,
+        cloudHits,
+        cacheHits
+    });
 
     return { accuracies, cloudHits, cacheHits, consistentDepth };
 }

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ArrowRight, Calendar, Loader2, User, FileText } from "lucide-react";
 
 import Game from "@/types/game/Game";
@@ -8,10 +8,13 @@ import { useAppStore } from "../store";
 import {
     parsePgn,
     getChessComGames,
-    getLichessGames
+    getLichessGames,
+    getRecentChessComGames,
+    getRecentLichessGames
 } from "../lib/importers";
 
 type Source = "pgn" | "chesscom" | "lichess";
+type FetchMode = "recent" | "month";
 
 const sources: { id: Source; label: string }[] = [
     { id: "pgn", label: "PGN" },
@@ -53,6 +56,13 @@ const resultLabels: Record<string, string> = {
     [GameResult.UNKNOWN]: "—"
 };
 
+function countPgnMoves(pgn: string): number {
+    return (pgn
+        .replace(/\{[^}]*\}/g, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .match(/\b\d+\.(?:\.\.)?/g) || []).length;
+}
+
 /** How many recent games to reveal at a time. */
 const PAGE = 8;
 
@@ -72,6 +82,7 @@ function HomeScreen() {
     );
 
     const now = new Date();
+    const [fetchMode, setFetchMode] = useState<FetchMode>("recent");
     const [month, setMonth] = useState(now.getMonth() + 1);
     const [year, setYear] = useState(now.getFullYear());
 
@@ -79,20 +90,48 @@ function HomeScreen() {
     const [error, setError] = useState("");
     const [visibleCount, setVisibleCount] = useState(PAGE);
 
+    const pgnPreview = useMemo(() => {
+        if (!pgn.trim()) return null;
+
+        try {
+            return {
+                game: parsePgn(pgn),
+                moveCount: countPgnMoves(pgn),
+                error: ""
+            };
+        } catch {
+            return {
+                game: undefined,
+                moveCount: 0,
+                error: "Could not parse that PGN yet."
+            };
+        }
+    }, [pgn]);
+
     function importPgn() {
         setError("");
-        try {
-            loadGame(parsePgn(pgn));
-        } catch {
+        if (pgnPreview?.game) {
+            loadGame(pgnPreview.game);
+        } else {
             setError("Could not parse that PGN. Check the format!");
+        }
+    }
+
+    async function importPgnFile(file: File) {
+        setError("");
+        try {
+            setPgn(await file.text());
+        } catch {
+            setError("Could not read that PGN file.");
         }
     }
 
     async function fetchGames() {
         if (!username.trim()) return;
 
-        const isFuture = year > now.getFullYear()
-            || (year == now.getFullYear() && month > now.getMonth() + 1);
+        const isFuture = fetchMode == "month"
+            && (year > now.getFullYear()
+                || (year == now.getFullYear() && month > now.getMonth() + 1));
         if (isFuture) {
             setError("That month is in the future — pick an earlier month.");
             return;
@@ -105,8 +144,12 @@ function HomeScreen() {
 
         try {
             const fetched = source == "chesscom"
-                ? await getChessComGames(username.trim(), month, year)
-                : await getLichessGames(username.trim(), month, year);
+                ? fetchMode == "recent"
+                    ? await getRecentChessComGames(username.trim())
+                    : await getChessComGames(username.trim(), month, year)
+                : fetchMode == "recent"
+                    ? await getRecentLichessGames(username.trim())
+                    : await getLichessGames(username.trim(), month, year);
 
             setSearchResults(fetched, username.trim());
 
@@ -115,9 +158,13 @@ function HomeScreen() {
             }
 
             if (fetched.length == 0)
-                setError("No games found for that month.");
-        } catch {
-            setError("Could not fetch games. Check the username / connection.");
+                setError(fetchMode == "recent"
+                    ? "No recent games found."
+                    : "No games found for that month.");
+        } catch (err) {
+            setError(err instanceof Error
+                ? err.message
+                : "Could not fetch games. Check the username / connection.");
         } finally {
             setLoading(false);
         }
@@ -207,9 +254,49 @@ function HomeScreen() {
                     resize: "vertical"
                 }}
             />
+
+            <label style={{
+                display: "block",
+                marginTop: 10,
+                padding: "11px 12px",
+                borderRadius: var_r("md"),
+                background: "var(--surface-2)",
+                border: "1px dashed var(--line-strong)",
+                color: "var(--text-dim)",
+                fontSize: 13,
+                fontWeight: 700,
+                textAlign: "center",
+                cursor: "pointer"
+            }}>
+                Or choose a .pgn file
+                <input
+                    type="file"
+                    accept=".pgn,text/plain"
+                    onChange={event => {
+                        const file = event.target.files?.[0];
+                        if (file) void importPgnFile(file);
+                        event.currentTarget.value = "";
+                    }}
+                    style={{ display: "none" }}
+                />
+            </label>
+
+            {pgnPreview?.game && <PgnPreviewCard
+                game={pgnPreview.game}
+                moveCount={pgnPreview.moveCount}
+            />}
+
+            {pgnPreview?.error && <p style={{
+                color: "var(--text-faint)",
+                fontSize: 12.5,
+                margin: "10px 2px 0"
+            }}>
+                {pgnPreview.error}
+            </p>}
+
             <PrimaryButton
                 onClick={importPgn}
-                disabled={!pgn.trim()}
+                disabled={!pgnPreview?.game}
                 label="Load game"
             />
         </div>}
@@ -248,34 +335,66 @@ function HomeScreen() {
                 />
             </div>
 
-            <Label icon={<Calendar size={13} />}>Month &amp; Year</Label>
-            <div style={{ display: "flex", gap: 8 }}>
-                <select
-                    value={month}
-                    onChange={event => setMonth(Number(event.target.value))}
-                    style={selectStyle}
-                >
-                    {Array.from({ length: 12 }, (_, index) => (
-                        <option key={index} value={index + 1}>
-                            {new Date(2000, index)
-                                .toLocaleString("en", { month: "long" })}
-                        </option>
-                    ))}
-                </select>
-
-                <select
-                    value={year}
-                    onChange={event => setYear(Number(event.target.value))}
-                    style={selectStyle}
-                >
-                    {Array.from({ length: 6 }, (_, index) => {
-                        const optionYear = now.getFullYear() - index;
-                        return <option key={optionYear} value={optionYear}>
-                            {optionYear}
-                        </option>;
-                    })}
-                </select>
+            <Label icon={<Calendar size={13} />}>Import Range</Label>
+            <div style={{
+                display: "flex",
+                gap: 6,
+                background: "var(--surface-2)",
+                border: "1px solid var(--line)",
+                borderRadius: var_r("md"),
+                padding: 4,
+                marginBottom: 12
+            }}>
+                {(["recent", "month"] as FetchMode[]).map(mode => {
+                    const active = fetchMode == mode;
+                    return <button
+                        key={mode}
+                        onClick={() => setFetchMode(mode)}
+                        style={{
+                            flex: 1,
+                            padding: "8px 0",
+                            borderRadius: var_r("sm"),
+                            background: active ? "var(--surface-3)" : "transparent",
+                            color: active ? "var(--text)" : "var(--text-faint)",
+                            fontWeight: 800,
+                            fontSize: 13
+                        }}
+                    >
+                        {mode == "recent" ? "Recent 50" : "Pick month"}
+                    </button>;
+                })}
             </div>
+
+            {fetchMode == "month" && <>
+                <Label icon={<Calendar size={13} />}>Month &amp; Year</Label>
+                <div style={{ display: "flex", gap: 8 }}>
+                    <select
+                        value={month}
+                        onChange={event => setMonth(Number(event.target.value))}
+                        style={selectStyle}
+                    >
+                        {Array.from({ length: 12 }, (_, index) => (
+                            <option key={index} value={index + 1}>
+                                {new Date(2000, index)
+                                    .toLocaleString("en", { month: "long" })}
+                            </option>
+                        ))}
+                    </select>
+
+                    <select
+                        value={year}
+                        onChange={event => setYear(Number(event.target.value))}
+                        style={selectStyle}
+                    >
+                        {Array.from({ length: 6 }, (_, index) => {
+                            const optionYear = now.getFullYear() - index;
+                            return <option key={optionYear} value={optionYear}>
+                                {optionYear}
+                            </option>;
+                        })}
+                    </select>
+                </div>
+            </>}
 
             <PrimaryButton
                 onClick={() => void fetchGames()}
@@ -362,6 +481,54 @@ function HomeScreen() {
             Fully on-device · No account · No tracking<br />
             Your games never leave your phone.
         </div>}
+    </div>;
+}
+
+function PgnPreviewCard(props: { game: Game; moveCount: number }) {
+    const { game } = props;
+    const result = game.players.white.result == GameResult.WIN
+        ? "1-0"
+        : game.players.black.result == GameResult.WIN
+            ? "0-1"
+            : game.players.white.result == GameResult.DRAW ? "½-½" : "*";
+
+    return <div style={{
+        marginTop: 12,
+        padding: "12px 13px",
+        borderRadius: var_r("md"),
+        background: "var(--surface-2)",
+        border: "1px solid var(--line)"
+    }}>
+        <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            fontWeight: 800,
+            fontSize: 14
+        }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {game.players.white.username || "White"}
+            </span>
+            <span style={{ color: "var(--text-faint)", flexShrink: 0 }}>vs</span>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {game.players.black.username || "Black"}
+            </span>
+        </div>
+        <div style={{
+            marginTop: 7,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            color: "var(--text-dim)",
+            fontSize: 12
+        }}>
+            <span>{result}</span>
+            <span>·</span>
+            <span>{props.moveCount || "—"} move{props.moveCount == 1 ? "" : "s"}</span>
+            {game.date && <><span>·</span><span>{new Date(game.date).toLocaleDateString()}</span></>}
+            <span>·</span>
+            <span>{game.variant}</span>
+        </div>
     </div>;
 }
 

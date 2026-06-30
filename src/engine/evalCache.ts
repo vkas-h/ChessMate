@@ -1,6 +1,7 @@
 import { get, set, keys, del } from "idb-keyval";
 
 import { EngineLine } from "@/types/game/position/EngineLine";
+import EngineVersion from "@/constants/EngineVersion";
 
 /**
  * Persistent evaluation cache (FEN -> engine lines), so re-analysing a
@@ -12,12 +13,18 @@ import { EngineLine } from "@/types/game/position/EngineLine";
  * and transpositions become near-instant cache hits.
  */
 
-const CACHE_PREFIX = "eval:";
+const CACHE_SCHEMA_VERSION = 2;
+const CACHE_PREFIX = `eval:v${CACHE_SCHEMA_VERSION}:${EngineVersion.STOCKFISH_17_LITE}:`;
+const ANY_EVAL_CACHE_PREFIX = "eval:";
 
 /** Cap so the cache can't grow unbounded on heavy users. */
 const MAX_ENTRIES = 5000;
 
 interface CacheEntry {
+    /** cache format version; bumped when keying/storage semantics change */
+    schemaVersion: number;
+    /** engine version this cache namespace was written for */
+    engineVersion: EngineVersion;
     /** best depth we have stored for this FEN */
     depth: number;
     lines: EngineLine[];
@@ -52,12 +59,19 @@ export async function hydrateEvalCache(): Promise<void> {
         for (const key of allKeys) {
             try {
                 const entry = await get<CacheEntry>(key);
-                if (entry && Array.isArray(entry.lines)) {
+                if (
+                    entry
+                    && entry.schemaVersion == CACHE_SCHEMA_VERSION
+                    && entry.engineVersion == EngineVersion.STOCKFISH_17_LITE
+                    && Array.isArray(entry.lines)
+                ) {
                     memory.set(key.slice(CACHE_PREFIX.length), entry);
                 }
             } catch { /* skip corrupt entry */ }
         }
     } catch { /* IndexedDB may be unavailable */ }
+
+    if (memory.size > MAX_ENTRIES) void pruneCache();
 }
 
 /**
@@ -66,11 +80,13 @@ export async function hydrateEvalCache(): Promise<void> {
  */
 export function getCachedLines(
     fen: string,
-    minDepth: number
+    minDepth: number,
+    minCount = 1
 ): EngineLine[] | undefined {
     const entry = memory.get(normaliseFen(fen));
     if (!entry) return undefined;
     if (entry.depth < minDepth) return undefined;
+    if (entry.lines.length < minCount) return undefined;
 
     entry.touched = Date.now();
     return entry.lines;
@@ -84,16 +100,31 @@ export function putCachedLines(fen: string, lines: EngineLine[]): void {
     const depth = Math.max(...lines.map(line => line.depth));
 
     const existing = memory.get(key);
-    if (existing && existing.depth >= depth) {
+    if (
+        existing
+        && (
+            existing.depth > depth
+            || (existing.depth == depth && existing.lines.length >= lines.length)
+        )
+    ) {
         existing.touched = Date.now();
         return;
     }
 
-    const entry: CacheEntry = { depth, lines, touched: Date.now() };
+    const entry: CacheEntry = {
+        schemaVersion: CACHE_SCHEMA_VERSION,
+        engineVersion: EngineVersion.STOCKFISH_17_LITE,
+        depth,
+        lines,
+        touched: Date.now()
+    };
     memory.set(key, entry);
 
-    // fire-and-forget persistence
-    void set(CACHE_PREFIX + key, entry).catch(() => { /* ignore */ });
+    // fire-and-forget persistence; IndexedDB may be unavailable in tests
+    // or hardened browser contexts.
+    try {
+        void set(CACHE_PREFIX + key, entry).catch(() => { /* ignore */ });
+    } catch { /* ignore */ }
 
     if (memory.size > MAX_ENTRIES) void pruneCache();
 }
@@ -112,12 +143,25 @@ async function pruneCache(): Promise<void> {
     }
 }
 
+export async function getEvalCacheStats(): Promise<{ entries: number }> {
+    try {
+        const allKeys = (await keys()).filter(
+            key => typeof key == "string"
+                && key.startsWith(ANY_EVAL_CACHE_PREFIX)
+        );
+        return { entries: allKeys.length };
+    } catch {
+        return { entries: memory.size };
+    }
+}
+
 /** Wipe the entire eval cache (settings / troubleshooting). */
 export async function clearEvalCache(): Promise<void> {
     memory.clear();
     try {
         const allKeys = (await keys()).filter(
-            key => typeof key == "string" && key.startsWith(CACHE_PREFIX)
+            key => typeof key == "string"
+                && key.startsWith(ANY_EVAL_CACHE_PREFIX)
         ) as string[];
         await Promise.all(allKeys.map(key => del(key)));
     } catch { /* ignore */ }

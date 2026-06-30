@@ -1,5 +1,8 @@
 import { StateTreeNode } from "@/types/game/position/StateTreeNode";
-import { getTopEngineLine } from "@/types/game/position/EngineLine";
+import {
+    getTopEngineLine,
+    mergeEngineLines
+} from "@/types/game/position/EngineLine";
 import { classify } from "@/lib/reporter/classify";
 import { getMoveAccuracy } from "@/lib/reporter/accuracy";
 import { adaptPieceColour } from "@/constants/PieceColour";
@@ -71,9 +74,9 @@ class RealtimeAnalyser {
             if (token != this.currentToken) return;
 
             // 1. local cache (instant)
-            const cached = getCachedLines(target.state.fen, MIN_DEPTH);
+            const cached = getCachedLines(target.state.fen, MIN_DEPTH, 2);
             if (cached) {
-                target.state.engineLines.push(...cached);
+                mergeEngineLines(target.state.engineLines, cached);
                 options.onUpdate();
                 continue;
             }
@@ -88,7 +91,7 @@ class RealtimeAnalyser {
 
                 if (token != this.currentToken) return;
 
-                target.state.engineLines.push(...cloudLines);
+                mergeEngineLines(target.state.engineLines, cloudLines);
                 putCachedLines(target.state.fen, cloudLines);
                 evaluated = true;
             } catch {
@@ -110,7 +113,7 @@ class RealtimeAnalyser {
 
                 if (token != this.currentToken) return;
 
-                target.state.engineLines.push(...lines);
+                mergeEngineLines(target.state.engineLines, lines);
                 putCachedLines(target.state.fen, lines);
             }
 

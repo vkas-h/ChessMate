@@ -9,6 +9,37 @@ import Variant from "@/constants/game/Variant";
 import { STARTING_FEN } from "@/constants/utils";
 import { padDateNumber, getMonthLength } from "@/lib/utils/date";
 
+export type ImportErrorCode = "not_found" | "network" | "rate_limited" | "server";
+
+export class ImportError extends Error {
+    constructor(public code: ImportErrorCode, message: string) {
+        super(message);
+        this.name = "ImportError";
+    }
+}
+
+function importError(platform: string, response: Response): ImportError {
+    if (response.status == 404) {
+        return new ImportError("not_found", `${platform} user not found.`);
+    }
+    if (response.status == 429) {
+        return new ImportError(
+            "rate_limited",
+            `${platform} is rate-limiting requests. Try again in a minute.`
+        );
+    }
+    if (response.status >= 500) {
+        return new ImportError(
+            "server",
+            `${platform} is temporarily unavailable. Try again later.`
+        );
+    }
+    return new ImportError(
+        "network",
+        `${platform} returned an error (${response.status}).`
+    );
+}
+
 /* ---------------------------------- PGN ---------------------------------- */
 
 function parseResultString(result: string, colour: PieceColour) {
@@ -90,6 +121,31 @@ const chessComResults: Record<string, GameResult | undefined> = {
     timevsinsufficient: GameResult.DRAW
 };
 
+function mapChessComGame(game: any): Game {
+    return {
+        pgn: game.pgn,
+        timeControl: chessComTimeControls[game["time_class"]]
+            || TimeControl.CORRESPONDENCE,
+        variant: chessComVariants[game.rules] || Variant.STANDARD,
+        initialPosition: game["initial_setup"] || STARTING_FEN,
+        players: {
+            white: {
+                username: game.white.username,
+                rating: game.white.rating,
+                result: chessComResults[game.white.result]
+                    || GameResult.UNKNOWN
+            },
+            black: {
+                username: game.black.username,
+                rating: game.black.rating,
+                result: chessComResults[game.black.result]
+                    || GameResult.UNKNOWN
+            }
+        },
+        date: new Date(game["end_time"] * 1000).toISOString()
+    };
+}
+
 export async function getChessComGames(
     username: string,
     month: number,
@@ -101,35 +157,46 @@ export async function getChessComGames(
     );
 
     if (response.status == 404) return [];
-    if (!response.ok) throw new Error(`chess.com error ${response.status}`);
+    if (!response.ok) throw importError("Chess.com", response);
 
     const games: any[] = (await response.json()).games || [];
 
     return games
         .reverse()
         .filter(game => Object.keys(chessComVariants).includes(game.rules))
-        .map(game => ({
-            pgn: game.pgn,
-            timeControl: chessComTimeControls[game["time_class"]]
-                || TimeControl.CORRESPONDENCE,
-            variant: chessComVariants[game.rules] || Variant.STANDARD,
-            initialPosition: game["initial_setup"] || STARTING_FEN,
-            players: {
-                white: {
-                    username: game.white.username,
-                    rating: game.white.rating,
-                    result: chessComResults[game.white.result]
-                        || GameResult.UNKNOWN
-                },
-                black: {
-                    username: game.black.username,
-                    rating: game.black.rating,
-                    result: chessComResults[game.black.result]
-                        || GameResult.UNKNOWN
-                }
-            },
-            date: new Date(game["end_time"] * 1000).toISOString()
-        }));
+        .map(mapChessComGame);
+}
+
+export async function getRecentChessComGames(
+    username: string,
+    maxGames = 50
+): Promise<Game[]> {
+    const archivesResponse = await fetch(
+        `https://api.chess.com/pub/player/${username}/games/archives`
+    );
+
+    if (!archivesResponse.ok) throw importError("Chess.com", archivesResponse);
+
+    const archives: string[] = (await archivesResponse.json()).archives || [];
+    const recentArchives = archives.slice(-6).reverse();
+    const collected: Game[] = [];
+
+    for (const archiveUrl of recentArchives) {
+        if (collected.length >= maxGames) break;
+
+        const response = await fetch(archiveUrl);
+        if (!response.ok) continue;
+
+        const games: any[] = (await response.json()).games || [];
+        collected.push(
+            ...games
+                .reverse()
+                .filter(game => Object.keys(chessComVariants).includes(game.rules))
+                .map(mapChessComGame)
+        );
+    }
+
+    return collected.slice(0, maxGames);
 }
 
 /* --------------------------------- Lichess -------------------------------- */
@@ -148,6 +215,66 @@ const lichessVariants: Record<string, Variant | undefined> = {
     chess960: Variant.CHESS960
 };
 
+function mapLichessGame(game: any): Game {
+    const results = {
+        [PieceColour.WHITE]: GameResult.DRAW,
+        [PieceColour.BLACK]: GameResult.DRAW
+    };
+
+    if (game.winner == "white") {
+        results[PieceColour.WHITE] = GameResult.WIN;
+        results[PieceColour.BLACK] = GameResult.LOSE;
+    } else if (game.winner == "black") {
+        results[PieceColour.BLACK] = GameResult.WIN;
+        results[PieceColour.WHITE] = GameResult.LOSE;
+    }
+
+    const whiteUsername = game.players.white.aiLevel
+        ? `Stockfish ${game.players.white.aiLevel}`
+        : game.players.white.user?.name;
+
+    const blackUsername = game.players.black.aiLevel
+        ? `Stockfish ${game.players.black.aiLevel}`
+        : game.players.black.user?.name;
+
+    return {
+        pgn: game.pgn,
+        initialPosition: game.initialFen || STARTING_FEN,
+        timeControl: lichessTimeControls[game.speed]
+            || TimeControl.CORRESPONDENCE,
+        variant: lichessVariants[game.variant] || Variant.STANDARD,
+        players: {
+            white: {
+                username: whiteUsername,
+                rating: game.players.white.rating,
+                title: game.players.white.user?.title,
+                result: results[PieceColour.WHITE]
+            },
+            black: {
+                username: blackUsername,
+                rating: game.players.black.rating,
+                title: game.players.black.user?.title,
+                result: results[PieceColour.BLACK]
+            }
+        },
+        date: new Date(game.lastMoveAt).toISOString()
+    } as Game;
+}
+
+async function fetchLichessNdjson(url: string): Promise<Game[]> {
+    const response = await fetch(url, {
+        headers: { Accept: "application/x-ndjson" }
+    });
+
+    if (!response.ok) throw importError("Lichess", response);
+
+    return (await response.text())
+        .split("\n")
+        .filter(line => line.length > 0)
+        .map(line => JSON.parse(line))
+        .map(mapLichessGame);
+}
+
 export async function getLichessGames(
     username: string,
     month: number,
@@ -161,64 +288,20 @@ export async function getLichessGames(
         + "T23:59:59.999Z"
     );
 
-    const response = await fetch(
+    return fetchLichessNdjson(
         `https://lichess.org/api/games/user/${username}`
         + `?since=${monthStart.getTime()}`
         + `&until=${monthEnd.getTime()}`
-        + "&pgnInJson=true&max=50",
-        { headers: { Accept: "application/x-ndjson" } }
+        + "&pgnInJson=true&max=50"
     );
+}
 
-    if (!response.ok) throw new Error(`lichess error ${response.status}`);
-
-    const games = (await response.text())
-        .split("\n")
-        .filter(line => line.length > 0)
-        .map(line => JSON.parse(line));
-
-    return games.map(game => {
-        const results = {
-            [PieceColour.WHITE]: GameResult.DRAW,
-            [PieceColour.BLACK]: GameResult.DRAW
-        };
-
-        if (game.winner == "white") {
-            results[PieceColour.WHITE] = GameResult.WIN;
-            results[PieceColour.BLACK] = GameResult.LOSE;
-        } else if (game.winner == "black") {
-            results[PieceColour.BLACK] = GameResult.WIN;
-            results[PieceColour.WHITE] = GameResult.LOSE;
-        }
-
-        const whiteUsername = game.players.white.aiLevel
-            ? `Stockfish ${game.players.white.aiLevel}`
-            : game.players.white.user?.name;
-
-        const blackUsername = game.players.black.aiLevel
-            ? `Stockfish ${game.players.black.aiLevel}`
-            : game.players.black.user?.name;
-
-        return {
-            pgn: game.pgn,
-            initialPosition: game.initialFen || STARTING_FEN,
-            timeControl: lichessTimeControls[game.speed]
-                || TimeControl.CORRESPONDENCE,
-            variant: lichessVariants[game.variant] || Variant.STANDARD,
-            players: {
-                white: {
-                    username: whiteUsername,
-                    rating: game.players.white.rating,
-                    title: game.players.white.user?.title,
-                    result: results[PieceColour.WHITE]
-                },
-                black: {
-                    username: blackUsername,
-                    rating: game.players.black.rating,
-                    title: game.players.black.user?.title,
-                    result: results[PieceColour.BLACK]
-                }
-            },
-            date: new Date(game.lastMoveAt).toISOString()
-        } as Game;
-    });
+export async function getRecentLichessGames(
+    username: string,
+    maxGames = 50
+): Promise<Game[]> {
+    return fetchLichessNdjson(
+        `https://lichess.org/api/games/user/${username}`
+        + `?pgnInJson=true&max=${maxGames}`
+    );
 }

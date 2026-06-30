@@ -4,6 +4,7 @@ import AnalysedGame from "@/types/game/AnalysedGame";
 
 import { useAppStore } from "../store";
 import { analyseGame } from "../engine/analyse";
+import { enginePool } from "../engine/enginePool";
 import { realtimeAnalyser } from "../engine/realtime";
 import { saveGame } from "../lib/library";
 import { getToggle } from "../lib/settings";
@@ -30,6 +31,7 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
     const [error, setError] = useState<string | null>(null);
     const [depthWarning, setDepthWarning] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
 
     const abortRef = useRef<AbortController | null>(null);
     const savedAtVersionRef = useRef<number | null>(null);
@@ -52,7 +54,9 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
 
     async function start() {
         if (analysing) {
+            setCancelling(true);
             abortRef.current?.abort();
+            enginePool.stop();
             return;
         }
 
@@ -63,6 +67,7 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
         setSaved(false);
         setError(null);
         setDepthWarning(false);
+        setCancelling(false);
         setAnalysing(true);
 
         const controller = new AbortController();
@@ -80,6 +85,7 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
             });
 
             setDepthWarning(!result.consistentDepth);
+            setCancelling(false);
             finishAnalysis(result.accuracies);
 
             // Auto-save to the library if the user enabled it, so the
@@ -90,13 +96,27 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
         } catch (err) {
             setAnalysing(false);
             setAnalysisProgress(null);
+            setCancelling(false);
 
             const aborted = controller.signal.aborted
                 || (err instanceof Error && err.message == "aborted");
 
             if (!aborted) {
-                setError("Analysis failed. Check your connection and try again.");
+                const message = err instanceof Error ? err.message : "";
+                if (message.includes("timed out")) {
+                    setError(
+                        "Stockfish took too long on a position. Try the Quick preset or restart the app."
+                    );
+                } else if (typeof navigator != "undefined" && !navigator.onLine) {
+                    setError(
+                        "You appear to be offline. Disable cloud analysis or reconnect and try again."
+                    );
+                } else {
+                    setError("Analysis failed. Try the Quick preset or reload the app.");
+                }
             }
+        } finally {
+            if (abortRef.current == controller) abortRef.current = null;
         }
     }
 
@@ -126,6 +146,7 @@ export function useAnalysisRunner(game: AnalysedGame, treeVersion: number) {
         error, setError,
         depthWarning,
         saved,
+        cancelling,
         checkStale,
         start, save
     };

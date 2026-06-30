@@ -30,14 +30,26 @@ class Engine {
     private consumeLogs(
         command: string,
         endCondition: (logMessage: string) => boolean,
-        onLogReceived?: (logMessage: string) => void
+        onLogReceived?: (logMessage: string) => void,
+        timeoutMs?: number
     ): Promise<string[]> {
-        this.worker.postMessage(command);
-
         const worker = this.worker;
         const logMessages: string[] = [];
 
         return new Promise((res, rej) => {
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+
+            function cleanup() {
+                worker.removeEventListener("message", onMessageReceived);
+                worker.removeEventListener("error", onError);
+                if (timeout) clearTimeout(timeout);
+            }
+
+            function onError(error: ErrorEvent) {
+                cleanup();
+                rej(error);
+            }
+
             function onMessageReceived(event: MessageEvent) {
                 const message = String(event.data);
 
@@ -45,15 +57,22 @@ class Engine {
                 logMessages.push(message);
 
                 if (endCondition(message)) {
-                    worker.removeEventListener("message", onMessageReceived);
-                    worker.removeEventListener("error", rej);
-
+                    cleanup();
                     res(logMessages);
                 }
             }
 
-            this.worker.addEventListener("message", onMessageReceived);
-            this.worker.addEventListener("error", rej);
+            if (timeoutMs) {
+                timeout = setTimeout(() => {
+                    worker.postMessage("stop");
+                    cleanup();
+                    rej(new Error("engine evaluation timed out"));
+                }, timeoutMs);
+            }
+
+            worker.addEventListener("message", onMessageReceived);
+            worker.addEventListener("error", onError);
+            worker.postMessage(command);
         });
     }
 
@@ -111,6 +130,10 @@ class Engine {
             ? `go movetime ${options.timeLimit}`
             : `go depth ${options.depth}`
                 + (options.timeLimit ? ` movetime ${options.timeLimit}` : "");
+
+        const watchdogMs = options.timeLimit
+            ? options.timeLimit + 10_000
+            : 60_000;
 
         await this.consumeLogs(
             goCommand,
@@ -176,7 +199,8 @@ class Engine {
 
                 engineLines.push(newEngineLine);
                 options.onEngineLine?.(newEngineLine);
-            }
+            },
+            watchdogMs
         );
 
         return engineLines;

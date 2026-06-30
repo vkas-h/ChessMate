@@ -25,6 +25,30 @@ export function isEngineLineEqual(line: EngineLine, other: EngineLine) {
 }
 
 /**
+ * Merge engine lines into an existing list without duplicating identical
+ * source/depth/index entries. The list is mutated in place and returned so
+ * callers can keep their current state-tree mutation flow.
+ */
+export function mergeEngineLines(
+    target: EngineLine[],
+    incoming: EngineLine[]
+): EngineLine[] {
+    for (const line of incoming) {
+        const existingIndex = target.findIndex(existing =>
+            isEngineLineEqual(existing, line)
+        );
+
+        if (existingIndex >= 0) {
+            target[existingIndex] = line;
+        } else {
+            target.push(line);
+        }
+    }
+
+    return target;
+}
+
+/**
  * @description Finds an engine line in a list of lines that is the same
  * as the reference line but has a specified index.
  */
