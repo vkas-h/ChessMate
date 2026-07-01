@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 const PROMO_GLYPHS: Record<string, Record<string, string>> = {
     w: { q: "♕", r: "♖", b: "♗", n: "♘" },
     b: { q: "♛", r: "♜", b: "♝", n: "♞" }
@@ -8,7 +10,19 @@ function PromotionDialog(props: {
     onPick: (piece: "q" | "r" | "b" | "n") => void;
     onCancel: () => void;
 }) {
+    const dialogRef = useRef<HTMLDivElement | null>(null);
     const pieces: ("q" | "r" | "b" | "n")[] = ["q", "r", "b", "n"];
+
+    useEffect(() => {
+        dialogRef.current?.focus();
+
+        function onKey(event: KeyboardEvent) {
+            if (event.key == "Escape") props.onCancel();
+        }
+
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [props.onCancel]);
 
     return <div
         onClick={props.onCancel}
@@ -23,23 +37,28 @@ function PromotionDialog(props: {
         }}
     >
         <div
+            ref={dialogRef}
             onClick={event => event.stopPropagation()}
             role="dialog"
+            aria-modal="true"
             aria-label="Choose promotion piece"
+            tabIndex={-1}
             style={{
                 background: "var(--surface-1)",
                 border: "1px solid var(--line)",
                 borderRadius: "var(--r-lg)",
                 padding: 16,
                 display: "flex",
-                gap: 10
+                gap: 10,
+                outline: "none"
             }}
         >
             {pieces.map(piece => <button
                 key={piece}
                 onClick={() => props.onPick(piece)}
                 aria-label={{
-                    q: "Queen", r: "Rook", b: "Bishop", n: "Knight"
+                    q: "Promote to queen", r: "Promote to rook",
+                    b: "Promote to bishop", n: "Promote to knight"
                 }[piece]}
                 style={{
                     width: 56,

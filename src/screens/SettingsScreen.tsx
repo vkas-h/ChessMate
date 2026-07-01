@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    ChevronLeft, User, Zap, Volume2,
+    User, Zap, Volume2,
     Trash2, Code2, Heart, Save, RefreshCw
 } from "lucide-react";
 
-import { useAppStore } from "../store";
 import {
     getUsername, setUsername as persistUsername,
     getToggle, setToggle, ToggleKey, Platform
@@ -25,7 +24,7 @@ import { checkForUpdate } from "../lib/updates";
 const APP_VERSION = __APP_VERSION__.replace(/\.0$/, "");
 
 function SettingsScreen() {
-    const setScreen = useAppStore(state => state.setScreen);
+    const importInputRef = useRef<HTMLInputElement | null>(null);
 
     const [ccUser, setCcUser] = useState(getUsername("chesscom"));
     const [liUser, setLiUser] = useState(getUsername("lichess"));
@@ -137,21 +136,6 @@ function SettingsScreen() {
             gap: 10,
             marginBottom: 18
         }}>
-            <button
-                onClick={() => setScreen("home")}
-                aria-label="Back"
-                style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: 8,
-                    borderRadius: "var(--r-md)",
-                    background: "var(--surface-1)",
-                    border: "1px solid var(--line)",
-                    color: "var(--text)"
-                }}
-            >
-                <ChevronLeft size={20} />
-            </button>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>
                 Settings
             </h1>
@@ -245,20 +229,25 @@ function SettingsScreen() {
                 Export saved games
             </button>
 
-            <label style={neutralButtonStyle}>
+            <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                style={neutralButtonStyle}
+            >
                 <Save size={15} />
                 Import saved games
-                <input
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={event => {
-                        const file = event.target.files?.[0];
-                        if (file) void onImportLibrary(file);
-                        event.currentTarget.value = "";
-                    }}
-                    style={{ display: "none" }}
-                />
-            </label>
+            </button>
+            <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={event => {
+                    const file = event.target.files?.[0];
+                    if (file) void onImportLibrary(file);
+                    event.currentTarget.value = "";
+                }}
+                style={{ display: "none" }}
+            />
 
             {backupMsg && <Hint>{backupMsg}</Hint>}
 

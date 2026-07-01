@@ -76,7 +76,8 @@ function ReportSummary(props: {
                     width: "100%",
                     display: "flex",
                     alignItems: "center",
-                    padding: "6px 6px",
+                    minHeight: 38,
+                    padding: "7px 6px",
                     gap: 10,
                     background: "transparent",
                     border: "none",
@@ -123,6 +124,7 @@ function ReportSummary(props: {
                 }}>
                     <img
                         src={classificationIcon(classif)}
+                        alt=""
                         style={{ width: 15, height: 15 }}
                     />
                     {classificationNames[classif]}

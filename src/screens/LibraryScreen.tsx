@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Library as LibraryIcon, Trash2, Search, X, BarChart3 } from "lucide-react";
 
-import GameResult from "@/constants/game/GameResult";
+import GameResult, {
+    getOpinionatedGameResult
+} from "@/constants/game/GameResult";
+import PieceColour from "@/constants/PieceColour";
 
 import { useAppStore } from "../store";
 import {
@@ -10,11 +13,19 @@ import {
     deleteGame,
     SavedGameSummary
 } from "../lib/library";
+import { getUsername } from "../lib/settings";
 
 type Sort = "recent" | "accuracy";
 
 function LibraryScreen() {
     const setLoadedAnalysis = useAppStore(state => state.setLoadedAnalysis);
+    const searchUsername = useAppStore(state => state.searchUsername);
+
+    const perspectiveUsers = useMemo(() => uniqueLowercase([
+        getUsername("chesscom"),
+        getUsername("lichess"),
+        searchUsername
+    ]), [searchUsername]);
 
     const [games, setGames] = useState<SavedGameSummary[]>([]);
     const [loading, setLoading] = useState(true);
@@ -56,20 +67,15 @@ function LibraryScreen() {
             : games;
 
         if (sort == "accuracy") {
-            return [...filtered].sort((a, b) => {
-                const aMax = Math.max(
-                    a.accuracies?.white ?? 0, a.accuracies?.black ?? 0
-                );
-                const bMax = Math.max(
-                    b.accuracies?.white ?? 0, b.accuracies?.black ?? 0
-                );
-                return bMax - aMax;
-            });
+            return [...filtered].sort((a, b) =>
+                sortableAccuracy(b, perspectiveUsers)
+                - sortableAccuracy(a, perspectiveUsers)
+            );
         }
 
         // already newest-first from listGames
         return filtered;
-    }, [games, query, sort]);
+    }, [games, query, sort, perspectiveUsers]);
 
     return <div style={{ padding: "20px 16px 80px" }}>
         <div style={{
@@ -172,7 +178,7 @@ function LibraryScreen() {
                     fontWeight: 700
                 }}
             >
-                {sort == "recent" ? "Recent" : "Accuracy"}
+                Sort: {sort == "recent" ? "Recent" : "Accuracy"}
             </button>
         </div>}
 
@@ -200,7 +206,13 @@ function LibraryScreen() {
             No games match "{query}".
         </p>}
 
-        {visible.map(game => <div
+        {visible.map(game => {
+            const perspective = getUserPerspective(game, perspectiveUsers);
+            const display = getDisplayPlayers(game, perspective);
+            const userAccuracy = getUserAccuracy(game, perspectiveUsers);
+            const opponentAccuracy = getOpponentAccuracy(game, perspectiveUsers);
+
+            return <div
             key={game.id}
             style={{
                 background: "var(--surface-1)",
@@ -224,7 +236,7 @@ function LibraryScreen() {
                     overflow: "hidden",
                     textOverflow: "ellipsis"
                 }}>
-                    {game.white} <span style={{ color: "var(--text-faint)", fontWeight: 600 }}>vs</span> {game.black}
+                    {display.primary} <span style={{ color: "var(--text-faint)", fontWeight: 600 }}>vs</span> {display.opponent}
                 </div>
 
                 <div style={{
@@ -234,11 +246,13 @@ function LibraryScreen() {
                     display: "flex",
                     gap: 8
                 }}>
-                    <ResultTag result={game.whiteResult} />
-                    {game.accuracies && !isNaN(game.accuracies.white) &&
+                    <ResultTag whiteResult={game.whiteResult} perspective={perspective} />
+                    {game.accuracies && !isNaN(userAccuracy) &&
                         <span>
-                            {game.accuracies.white.toFixed(0)}% ·{" "}
-                            {game.accuracies.black.toFixed(0)}%
+                            {userAccuracy.toFixed(0)}% you
+                            {!isNaN(opponentAccuracy)
+                                ? ` · ${opponentAccuracy.toFixed(0)}% opp`
+                                : ""}
                         </span>
                     }
                     <span>
@@ -287,21 +301,80 @@ function LibraryScreen() {
             >
                 <Trash2 size={17} />
             </button>}
-        </div>)}
+        </div>;
+        })}
     </div>;
 }
 
-function ResultTag(props: { result: string }) {
+function ResultTag(props: {
+    whiteResult: string;
+    perspective: PieceColour;
+}) {
+    const myResult = getOpinionatedGameResult(
+        props.whiteResult as GameResult,
+        props.perspective
+    );
+
     const labels: Record<string, [string, string]> = {
-        [GameResult.WIN]: ["1-0", "var(--good)"],
-        [GameResult.LOSE]: ["0-1", "var(--bad)"],
-        [GameResult.DRAW]: ["½-½", "var(--text-dim)"],
-        [GameResult.UNKNOWN]: ["*", "var(--text-dim)"]
+        [GameResult.WIN]: ["WIN", "var(--good)"],
+        [GameResult.LOSE]: ["LOSS", "var(--bad)"],
+        [GameResult.DRAW]: ["DRAW", "var(--text-dim)"],
+        [GameResult.UNKNOWN]: ["—", "var(--text-dim)"]
     };
 
-    const [label, colour] = labels[props.result] || labels.unknown;
+    const [label, colour] = labels[myResult] || labels[GameResult.UNKNOWN];
 
-    return <span style={{ color: colour, fontWeight: 800 }}>{label}</span>;
+    return <span style={{ color: colour, fontWeight: 800 }}>
+        {label}
+    </span>;
+}
+
+function lc(value?: string) {
+    return (value || "").trim().toLowerCase();
+}
+
+function uniqueLowercase(values: string[]) {
+    return [...new Set(values.map(lc).filter(Boolean))];
+}
+
+function getUserPerspective(
+    game: SavedGameSummary,
+    usernames: string[]
+): PieceColour {
+    const white = lc(game.white);
+    const black = lc(game.black);
+
+    if (usernames.some(user => user == black)) return PieceColour.BLACK;
+    if (usernames.some(user => user == white)) return PieceColour.WHITE;
+
+    // Fallback for old/imported games when no saved username matches:
+    // keep the raw PGN/white perspective rather than guessing.
+    return PieceColour.WHITE;
+}
+
+function getDisplayPlayers(game: SavedGameSummary, perspective: PieceColour) {
+    return perspective == PieceColour.BLACK
+        ? { primary: game.black || "Black", opponent: game.white || "White" }
+        : { primary: game.white || "White", opponent: game.black || "Black" };
+}
+
+function getUserAccuracy(game: SavedGameSummary, usernames: string[]) {
+    if (!game.accuracies) return NaN;
+    return getUserPerspective(game, usernames) == PieceColour.BLACK
+        ? game.accuracies.black
+        : game.accuracies.white;
+}
+
+function getOpponentAccuracy(game: SavedGameSummary, usernames: string[]) {
+    if (!game.accuracies) return NaN;
+    return getUserPerspective(game, usernames) == PieceColour.BLACK
+        ? game.accuracies.white
+        : game.accuracies.black;
+}
+
+function sortableAccuracy(game: SavedGameSummary, usernames: string[]) {
+    const accuracy = getUserAccuracy(game, usernames);
+    return Number.isNaN(accuracy) ? -1 : accuracy;
 }
 
 export default LibraryScreen;

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 import { StateTreeNode } from "@/types/game/position/StateTreeNode";
@@ -19,6 +19,19 @@ function FullMoveList(props: { onClose: () => void }) {
     const currentNode = useAppStore(state => state.currentNode);
     const goToNode = useAppStore(state => state.goToNode);
     useAppStore(state => state.treeVersion);
+
+    const dialogRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        dialogRef.current?.focus();
+
+        function onKey(event: KeyboardEvent) {
+            if (event.key == "Escape") props.onClose();
+        }
+
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [props.onClose]);
 
     const mainline = getMainlineChain(game.stateTree).slice(1); // drop root
 
@@ -51,17 +64,23 @@ function FullMoveList(props: { onClose: () => void }) {
         }}
     >
         <div
+            ref={dialogRef}
             onClick={event => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="full-move-list-title"
+            tabIndex={-1}
             style={{
                 width: "100%",
                 maxWidth: 560,
-                maxHeight: "70vh",
+                maxHeight: "min(74vh, 620px)",
                 background: "var(--surface-1)",
                 borderRadius: "18px 18px 0 0",
                 border: "1px solid var(--line)",
                 display: "flex",
                 flexDirection: "column",
-                paddingBottom: "env(safe-area-inset-bottom)"
+                paddingBottom: "env(safe-area-inset-bottom)",
+                outline: "none"
             }}
         >
             <div style={{
@@ -70,13 +89,21 @@ function FullMoveList(props: { onClose: () => void }) {
                 alignItems: "center",
                 padding: "16px 16px 10px"
             }}>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>
+                <h3 id="full-move-list-title" style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>
                     All moves
                 </h3>
                 <button
                     onClick={props.onClose}
                     aria-label="Close move list"
-                    style={{ color: "var(--text-faint)", padding: 6, display: "flex" }}
+                    style={{
+                        color: "var(--text-faint)",
+                        width: 40,
+                        height: 40,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "var(--r-sm)"
+                    }}
                 >
                     <X size={18} />
                 </button>
@@ -87,7 +114,7 @@ function FullMoveList(props: { onClose: () => void }) {
                     key={row.number}
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "32px 1fr 1fr",
+                        gridTemplateColumns: "32px minmax(0, 1fr) minmax(0, 1fr)",
                         alignItems: "center",
                         gap: 6,
                         padding: "2px 0"
@@ -122,6 +149,7 @@ function MoveCell(props: {
     return <button
         onClick={() => props.onJump(props.node)}
         style={{
+            minHeight: 36,
             display: "flex",
             alignItems: "center",
             gap: 5,
@@ -132,14 +160,19 @@ function MoveCell(props: {
             background: active ? "var(--accent-soft)" : "transparent",
             border: active ? "1px solid var(--accent)" : "1px solid transparent",
             color: classif ? classificationColours[classif] : "var(--text)",
-            textAlign: "left"
+            textAlign: "left",
+            minWidth: 0,
+            overflow: "hidden"
         }}
     >
         {classif && <img
             src={classificationIcon(classif)}
-            style={{ width: 13, height: 13 }}
+            alt=""
+            style={{ width: 13, height: 13, flexShrink: 0 }}
         />}
-        {props.node.state.move?.san}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {props.node.state.move?.san}
+        </span>
     </button>;
 }
 

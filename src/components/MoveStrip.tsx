@@ -60,7 +60,9 @@ function MoveStrip() {
             gap: 4,
             overflowX: "auto",
             padding: "10px 2px 6px",
-            scrollbarWidth: "none"
+            scrollbarWidth: "none",
+            maskImage: "linear-gradient(to right, #000 92%, transparent)",
+            WebkitMaskImage: "linear-gradient(to right, #000 92%, transparent)"
         }}>
             {mainline.map((node, index) => {
                 if (index == 0) return null;
@@ -181,7 +183,8 @@ function MoveButton(props: {
             display: "flex",
             alignItems: "center",
             gap: 4,
-            padding: props.small ? "3px 7px" : "5px 9px",
+            minHeight: props.small ? 30 : 34,
+            padding: props.small ? "4px 8px" : "6px 10px",
             borderRadius: 8,
             fontSize: props.small ? "0.8rem" : "0.88rem",
             fontWeight: props.active ? 800 : 600,
@@ -197,6 +200,7 @@ function MoveButton(props: {
     >
         {classif && <img
             src={classificationIcon(classif)}
+            alt=""
             style={{
                 width: props.small ? 12 : 14,
                 height: props.small ? 12 : 14

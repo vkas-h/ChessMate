@@ -112,6 +112,20 @@ export function useKeyboardNavigation(
 ) {
     useEffect(() => {
         function onKey(event: KeyboardEvent) {
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+                return;
+            }
+
+            const target = event.target as HTMLElement | null;
+            if (target?.closest(
+                "input, textarea, select, [contenteditable='true']"
+            )) return;
+
+            // Modal sheets/dialogs own keyboard interaction while open.
+            if (document.querySelector("[role='dialog'][aria-modal='true']")) {
+                return;
+            }
+
             if (event.key == "ArrowRight") stepForward();
             if (event.key == "ArrowLeft") stepBackward();
         }

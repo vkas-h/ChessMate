@@ -171,8 +171,9 @@ function EngineLines() {
                                 onClick={() => playLineMoves(line, index)}
                                 style={{
                                     flexShrink: 0,
-                                    padding: "2px 5px",
-                                    borderRadius: 5,
+                                    minHeight: 32,
+                                    padding: "4px 7px",
+                                    borderRadius: 6,
                                     fontSize: "0.82rem",
                                     fontWeight: index == 0 ? 800 : 500,
                                     color: index == 0

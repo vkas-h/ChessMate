@@ -190,13 +190,13 @@ function StatCard(props: {
             {props.big}
         </div>
         <div style={{
-            fontSize: 10, fontWeight: 800, letterSpacing: "0.05em",
+            fontSize: 11.5, fontWeight: 800, letterSpacing: "0.05em",
             color: "var(--text-faint)", marginTop: 4
         }}>
             {props.label}
         </div>
         {props.sub && <div style={{
-            fontSize: 10.5, fontWeight: 800, marginTop: 2, color: props.subColour
+            fontSize: 11.5, fontWeight: 800, marginTop: 2, color: props.subColour
         }}>
             {props.sub}
         </div>}
@@ -255,17 +255,17 @@ function ColourSplit(props: {
         borderRadius: "var(--r-md)",
         padding: "10px 12px"
     }}>
-        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-dim)" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-dim)" }}>
             {props.label.toUpperCase()}
         </div>
         <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>
             {isNaN(wr) ? "—" : `${wr.toFixed(0)}%`}
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-faint)" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-faint)" }}>
                 {" "}({props.wdl.total})
             </span>
         </div>
         {!isNaN(props.acc) && <div style={{
-            fontSize: 11, color: "var(--text-faint)", marginTop: 2
+            fontSize: 12, color: "var(--text-faint)", marginTop: 2
         }}>
             {props.acc.toFixed(1)}% acc
         </div>}
@@ -323,7 +323,7 @@ function HighlightRow(props: {
         }}
     >
         <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-faint)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-faint)" }}>
                 {props.label.toUpperCase()}
             </div>
             <div style={{

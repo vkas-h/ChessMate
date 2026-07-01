@@ -1,202 +1,201 @@
-<div align="center">
+# ChessMate
 
-# ♞ ChessMate
+ChessMate is a simple chess analysis app that runs on your device. Import a game, run Stockfish, review the important moments, and save the analysis locally.
 
-**A clean, offline-first chess game analysis app — powered by Stockfish 17 (WASM)**
-
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Built with Vite](https://img.shields.io/badge/Built%20with-Vite-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![PWA](https://img.shields.io/badge/PWA-Ready-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
-
-</div>
+No accounts. No tracking. No server-side analysis. Your games stay on your phone/browser unless you choose to share or export them.
 
 ---
 
-ChessMate is a **privacy-first chess analysis tool** that runs entirely in your browser. No accounts. No servers. No ads. Just chess — analysed locally using Stockfish 17 compiled to WebAssembly.
+## What it looks like
 
-Import your games from Chess.com or Lichess, or paste any PGN, and get instant move-by-move analysis with accuracy scores and move classifications — all saved on your device.
+<p align="center">
+  <img src="readme-assets/screenshots/chessmate-screen-4.jpg" width="210" alt="ChessMate analysis board" />
+  <img src="readme-assets/screenshots/chessmate-screen-1.jpg" width="210" alt="ChessMate game report" />
+  <img src="readme-assets/screenshots/chessmate-screen-6.jpg" width="210" alt="ChessMate saved game library" />
+</p>
 
----
-
-## ✨ Features
-
-| Feature | Detail |
-|---|---|
-| 🤖 **Stockfish 17 (WASM)** | Engine runs fully in-browser — no server needed |
-| 🏷️ **Move Classifications** | Brilliant · Critical · Best · Excellent · Okay · Inaccuracy · Mistake · Blunder · Theory · Forced |
-| 📊 **Accuracy %** | Per-player accuracy + full game report |
-| 📥 **Flexible Import** | Chess.com username · Lichess username · Raw PGN |
-| 📚 **Local Library** | Saved analyses stored in IndexedDB — your data stays on your device |
-| 📱 **PWA + Android** | Installable as a Progressive Web App; wrappable as a native Android/iOS app via Capacitor |
-| 🔒 **Zero Tracking** | No accounts · No sign-in · No CAPTCHA · No ads · No analytics |
-| 🌙 **Dark UI** | Sleek dark theme optimised for mobile |
+<p align="center">
+  <img src="readme-assets/screenshots/chessmate-screen-2.jpg" width="190" alt="Import PGN screen" />
+  <img src="readme-assets/screenshots/chessmate-screen-3.jpg" width="190" alt="Import games from Chess.com or Lichess" />
+  <img src="readme-assets/screenshots/chessmate-screen-5.jpg" width="190" alt="ChessMate insights screen" />
+</p>
 
 ---
 
-## 🚀 Getting Started
+## Features
 
-### Prerequisites
+- **On-device Stockfish analysis** using Stockfish 17 WASM.
+- **Game Review style feedback** with move labels like Best, Excellent, Inaccuracy, Mistake, Blunder, Theory, Brilliant, and more.
+- **Accuracy scores** for both players.
+- **Engine lines and evaluation bar** while exploring positions.
+- **Move-by-move review** with a cleaner coach-style analysis panel.
+- **Import games** from:
+  - pasted PGN
+  - `.pgn` file
+  - Chess.com username
+  - Lichess username
+- **Local library** for saved analysed games.
+- **Insights page** with score rate, accuracy, openings, time controls, and best/worst games.
+- **Share/export** current FEN or PGN with variations.
+- **PWA + Android support** through Capacitor.
 
-- [Node.js](https://nodejs.org/) v18+
-- npm v9+
+---
 
-### Install & Run
+## How it works
 
-```sh
+1. Import a game from PGN, Chess.com, or Lichess.
+2. ChessMate builds the move tree in the browser.
+3. Stockfish evaluates the positions locally.
+4. The app classifies each move and calculates accuracy.
+5. You can save the analysed game to the local library.
+
+Saved games and cached engine evaluations are stored on the device with IndexedDB.
+
+---
+
+## Tech stack
+
+- React 18
+- TypeScript
+- Vite
+- Zustand
+- chess.js
+- react-chessboard
+- Stockfish 17 WASM
+- IndexedDB via idb-keyval
+- Capacitor for Android builds
+
+---
+
+## Run locally
+
+Requirements:
+
+- Node.js 22+ recommended
+- npm
+
+```bash
 git clone https://github.com/vkas-h/ChessMate.git
 cd ChessMate
 npm install
 npm run dev
 ```
 
-Open the URL shown (e.g. `http://localhost:5173`). To access from your phone on the same Wi-Fi:
+Open the local URL printed by Vite.
 
-```sh
+For testing on a phone over the same Wi-Fi:
+
+```bash
 npm run dev -- --host
 ```
 
-### Build for Production
-
-```sh
-npm run build      # type-checks + bundles → dist/
-npm run preview    # serve the production build locally
-```
-
 ---
 
-## 📱 Android / iOS App (Capacitor)
+## Build
 
-ChessMate is a standard Vite SPA and can be wrapped into a native app using [Capacitor](https://capacitorjs.com/):
-
-```sh
+```bash
+npm test
 npm run build
-npm run android:sync   # builds + syncs to the Android project
-npm run android:open   # opens Android Studio — build & run from there
 ```
 
-For iOS, replace the `android` commands with `ios` (requires Xcode on macOS).
+The production web build is generated in:
 
-### 📲 Installing the APK (sideload)
-
-Download the latest `ChessMate-vX.X.X.apk` from the [Releases](https://github.com/vkas-h/ChessMate/releases) page and install it directly on your Android device.
-
-> [!IMPORTANT]
-> Because ChessMate is not distributed via the Google Play Store, Android will block the install by default.
-> You need to allow installation from unknown sources **once** before installing.
-
-**Step-by-step:**
-
-1. Transfer the `.apk` to your phone (USB, Google Drive, WhatsApp, etc.)
-2. Tap the file to begin installation
-3. If prompted **"Install unknown apps"** → tap **Settings** → enable **Allow from this source**
-4. Go back and tap **Install**
-
-**Samsung devices (One UI) — Auto Blocker:**
-Samsung phones running One UI 6+ have an extra **Auto Blocker** feature that must be turned off:
-
-> **Settings → Security & Privacy → Auto Blocker → toggle OFF**
-
-Then retry the install. You can turn Auto Blocker back on afterwards.
-
-**Google Play Protect warning:**
-If Play Protect flags the app, tap **"Install anyway"** — the app contains no malware.
-ChessMate is fully open-source; you can audit every line of code in this repo.
-
----
-
-## 🗂️ Project Structure
-
-```
-chessmate/
-├── public/
-│   ├── engines/          Stockfish 17 lite (WASM, ~7 MB, single-threaded)
-│   ├── img/              classification badges + piece images
-│   ├── audio/            move / capture / check sounds
-│   └── manifest.webmanifest  PWA manifest
-│
-└── src/
-    ├── core/             ⭐ WintrChess analysis core (unmodified logic)
-    │   ├── lib/reporter/     move classification engine
-    │   ├── lib/stateTree/    PGN ↔ move tree
-    │   ├── resources/        openings database
-    │   └── types/, constants/
-    │
-    ├── engine/
-    │   ├── Engine.ts         UCI wrapper around the Stockfish worker
-    │   ├── analyse.ts        evaluate-all-moves → classify pipeline
-    │   ├── accuracy.ts       per-player accuracy calculation
-    │   ├── realtime.ts       live eval during board exploration
-    │   └── presets.ts        engine depth / multipv presets
-    │
-    ├── lib/
-    │   ├── importers.ts      PGN / Chess.com / Lichess importers
-    │   ├── library.ts        on-device game storage (IndexedDB)
-    │   ├── classifications.ts  colours / icons / labels
-    │   └── sounds.ts         board sounds
-    │
-    ├── screens/
-    │   ├── HomeScreen.tsx    game import UI
-    │   ├── AnalysisScreen.tsx board + report view
-    │   └── LibraryScreen.tsx  saved games library
-    │
-    ├── components/
-    │   ├── NavBar.tsx
-    │   ├── EvalBar.tsx
-    │   ├── EvalGraph.tsx
-    │   ├── EngineLines.tsx
-    │   ├── MoveStrip.tsx
-    │   ├── ReportSummary.tsx
-    │   ├── ShareDialog.tsx
-    │   └── Splash.tsx
-    │
-    ├── store.ts          global app state (Zustand)
-    └── App.tsx, main.tsx, index.css
+```txt
+dist/
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## Android APK
 
-| Layer | Technology |
-|---|---|
-| Framework | [React 18](https://react.dev/) + [TypeScript 5](https://www.typescriptlang.org/) |
-| Build tool | [Vite 5](https://vitejs.dev/) |
-| Chess engine | [Stockfish 17](https://stockfishchess.org/) (WASM, single-threaded) |
-| Chess logic | [chess.js](https://github.com/jhlywa/chess.js) |
-| Board UI | [react-chessboard](https://github.com/Clariity/react-chessboard) |
-| State | [Zustand](https://github.com/pmndrs/zustand) |
-| Storage | [idb-keyval](https://github.com/jakearchibald/idb-keyval) (IndexedDB) |
-| PGN parsing | [@mliebelt/pgn-parser](https://github.com/mliebelt/pgn-parser) |
-| Mobile | [Capacitor 8](https://capacitorjs.com/) (Android / iOS) |
-| Validation | [Zod 4](https://zod.dev/) |
+ChessMate uses Capacitor for Android.
 
----
+```bash
+npm run android:sync
+npm run android:open
+```
 
-## 🤝 Contributing
+Then build the APK from Android Studio:
 
-Contributions are welcome! Feel free to:
+```txt
+Build → Build Bundle(s) / APK(s) → Build APK(s)
+```
 
-- 🐛 [Open an issue](https://github.com/vkas-h/ChessMate/issues) for bugs or feature requests
-- 🔀 Fork the repo and submit a pull request
-- ⭐ Star the repo if you find it useful
+Debug APK output is usually here:
 
-Please keep pull requests focused — one feature or fix per PR.
+```txt
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+For release builds, use Android Studio’s signed APK flow.
 
 ---
 
-## ⚖️ License
+## Versioning
 
-This project contains code derived from [WintrChess](https://github.com/wintrcat/wintrchess) (GPL-3.0).  
-As required by that license, **ChessMate is also distributed under [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0)**.
+Update both places before making a release:
 
-See the [LICENSE](LICENSE) file for full details.
+### App version shown inside ChessMate
+
+```txt
+package.json
+```
+
+```json
+"version": "1.2.1"
+```
+
+### Android APK version
+
+```txt
+android/app/build.gradle
+```
+
+```gradle
+versionCode 13
+versionName "1.2.1"
+```
+
+`versionCode` must increase for every Android release.
 
 ---
 
-<div align="center">
+## Project structure
 
-Made with ♟️ — vkas-h
+```txt
+src/
+├── components/       shared UI components
+├── screens/          main app screens
+├── engine/           Stockfish wrapper, analysis pipeline, eval cache
+├── lib/              importers, library storage, settings, stats, reports
+├── core/             chess analysis core, move classification, types
+├── store.ts          global app state
+└── main.tsx          app entry
+```
 
-</div>
+---
+
+## Privacy
+
+ChessMate is designed to be private by default.
+
+- No sign-in required.
+- No analytics.
+- No ads.
+- No server-side game storage.
+- Stockfish runs locally in the app.
+- Saved games stay in your browser/app storage.
+
+Network access is only used when you import games from Chess.com/Lichess or request cloud evaluation data when enabled.
+
+---
+
+## Credits
+
+ChessMate includes analysis logic derived from [WintrChess](https://github.com/wintrcat/wintrchess), and uses Stockfish for engine evaluation.
+
+---
+
+## License
+
+GPL-3.0. See [LICENSE](LICENSE).

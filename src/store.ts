@@ -13,6 +13,7 @@ import { AnalysisProgress } from "./engine/analyse";
 import { playMoveSound } from "./lib/sounds";
 
 export type Screen = "home" | "analysis" | "library" | "settings" | "stats";
+export type ImportSource = "pgn" | "chesscom" | "lichess";
 
 /* ------------------- history / back-button sync -------------------
  * "home" is the root entry. Drill-downs (loading a game) PUSH an
@@ -135,10 +136,19 @@ interface AppState {
     analysisView: "board" | "report";
     setAnalysisView: (view: "board" | "report") => void;
 
-    /** Search state persists across screen switches. */
+    /** Import/search state persists across screen switches. */
+    importSource: ImportSource;
+    setImportSource: (source: ImportSource) => void;
+    pgnDraft: string;
+    setPgnDraft: (pgn: string) => void;
     searchResults: Game[];
     searchUsername: string;
-    setSearchResults: (games: Game[], username: string) => void;
+    searchSource: ImportSource;
+    setSearchResults: (
+        games: Game[],
+        username: string,
+        source?: ImportSource
+    ) => void;
 
     setScreen: (screen: Screen) => void;
     loadGame: (game: Game) => void;
@@ -216,12 +226,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
     },
 
+    importSource: "pgn",
+    setImportSource: source => set({ importSource: source }),
+    pgnDraft: "",
+    setPgnDraft: pgn => set({ pgnDraft: pgn }),
     searchResults: [],
     searchUsername: "",
-    setSearchResults: (games, username) => set({
+    searchSource: "chesscom",
+    setSearchResults: (games, username, source) => set(state => ({
         searchResults: games,
-        searchUsername: username
-    }),
+        searchUsername: username,
+        searchSource: source ?? state.searchSource
+    })),
 
     // Tab switches REPLACE the current entry (tabs are siblings, not
     // a drill-down) - back from any tab goes towards "home"/exit.
@@ -236,9 +252,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             try { window.history.back(); } catch { /* ignore */ }
         }
 
-        if (screen == "settings" || screen == "stats") {
-            // Drill-down screens (gear / insights): push so Back returns
-            // to wherever you were.
+        if (screen == "stats") {
+            // Insights is a drill-down from Library: push so Back returns.
             pushEntry(screen);
         } else if (screen == "home") {
             // Going to root: replace, depth stays
@@ -318,8 +333,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     stepBackward: () => {
-        const parent = get().currentNode.parent;
-        if (parent) get().goToNode(parent, true);
+        const current = get().currentNode;
+        const parent = current.parent;
+        if (!parent) return;
+
+        // Navigating backward should still give the same tactile/audio
+        // feedback as stepping forward. Use the move that originally
+        // reached the current node, then move back silently so we don't
+        // play the parent's previous move instead.
+        if (current.state.move) {
+            try {
+                const move = new Chess(parent.state.fen)
+                    .move(current.state.move.san);
+                playMoveSound(move, new Chess(current.state.fen).isCheck());
+            } catch {
+                // sound is best-effort
+            }
+        }
+
+        get().goToNode(parent, true);
     },
 
     goToStart: () => get().goToNode(get().game.stateTree, true),

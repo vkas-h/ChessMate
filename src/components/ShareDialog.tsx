@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Share2, X, Check } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Share2, X } from "lucide-react";
 
 import renderStateTree from "@/lib/stateTree/render";
 
@@ -10,6 +10,18 @@ function ShareDialog(props: { onClose: () => void }) {
     const currentNode = useAppStore(state => state.currentNode);
 
     const [copied, setCopied] = useState<"fen" | "pgn" | null>(null);
+    const dialogRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        dialogRef.current?.focus();
+
+        function onKey(event: KeyboardEvent) {
+            if (event.key == "Escape") props.onClose();
+        }
+
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [props.onClose]);
 
     const pgn = useMemo(() => {
         try {
@@ -42,14 +54,20 @@ function ShareDialog(props: { onClose: () => void }) {
         }}
     >
         <div
+            ref={dialogRef}
             onClick={event => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="share-dialog-title"
+            tabIndex={-1}
             style={{
                 width: "100%",
                 maxWidth: 560,
                 background: "var(--surface-1)",
                 borderRadius: "18px 18px 0 0",
                 border: "1px solid var(--line)",
-                padding: "18px 16px calc(18px + env(safe-area-inset-bottom))"
+                padding: "18px 16px calc(18px + env(safe-area-inset-bottom))",
+                outline: "none"
             }}
         >
             <div style={{
@@ -58,23 +76,31 @@ function ShareDialog(props: { onClose: () => void }) {
                 alignItems: "center",
                 marginBottom: 14
             }}>
-                <h3 style={{
-                    margin: 0,
-                    fontSize: 16,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8
-                }}>
+                <h3
+                    id="share-dialog-title"
+                    style={{
+                        margin: 0,
+                        fontSize: 16,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                    }}
+                >
                     <Share2 size={17} style={{ color: "var(--accent)" }} />
                     Share / Export
                 </h3>
 
                 <button
                     onClick={props.onClose}
+                    aria-label="Close share dialog"
                     style={{
                         color: "var(--text-faint)",
-                        padding: 6,
-                        display: "flex"
+                        width: 40,
+                        height: 40,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "var(--r-sm)"
                     }}
                 >
                     <X size={18} />
@@ -95,6 +121,7 @@ function ShareDialog(props: { onClose: () => void }) {
                 readOnly
                 value={currentNode.state.fen}
                 onClick={event => event.currentTarget.select()}
+                aria-label="Current position FEN"
                 style={{
                     ...fieldStyle,
                     height: 40
@@ -115,6 +142,7 @@ function ShareDialog(props: { onClose: () => void }) {
                 readOnly
                 value={pgn}
                 onClick={event => event.currentTarget.select()}
+                aria-label="PGN with variations"
                 style={{
                     ...fieldStyle,
                     height: 140,
@@ -149,6 +177,7 @@ const fieldStyle: React.CSSProperties = {
 
 function copyButtonStyle(active: boolean): React.CSSProperties {
     return {
+        minHeight: 32,
         padding: "4px 12px",
         borderRadius: 8,
         fontSize: "0.78rem",

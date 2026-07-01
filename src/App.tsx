@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Settings as SettingsIcon } from "lucide-react";
 
 import { useAppStore } from "./store";
 import HomeScreen from "./screens/HomeScreen";
@@ -13,14 +12,20 @@ import UpdateBanner from "./components/UpdateBanner";
 
 function App() {
     const screen = useAppStore(state => state.screen);
-    const setScreen = useAppStore(state => state.setScreen);
 
     // Cold-start only: App mounts once per page load; tab switches
     // don't remount it, so the splash never replays in-session.
     const [splashDone, setSplashDone] = useState(false);
 
-    // Gear shows on the main tabs; hidden on full-screen sub-pages.
-    const showGear = screen != "settings" && screen != "stats";
+    // Insights is a full-screen drill-down from Library. All main tabs,
+    // including Settings, keep the tab bar visible so there is no floating
+    // gear overlapping headers/board content.
+    const showTabs = screen != "stats";
+
+    // Avoid covering the fixed Analysis move controls. Update prompts stay
+    // on low-risk browsing screens and are also available from Settings.
+    const showUpdateBanner = splashDone
+        && (screen == "home" || screen == "library");
 
     return <div style={{
         height: "100%",
@@ -30,39 +35,15 @@ function App() {
         margin: "0 auto",
         position: "relative"
     }}>
-        {showGear && <button
-            onClick={() => setScreen("settings")}
-            aria-label="Settings"
-            className="settings-gear"
-            style={{
-                position: "fixed",
-                top: "max(env(safe-area-inset-top), 10px)",
-                right: 12,
-                zIndex: 60,
-                width: 38,
-                height: 38,
-                borderRadius: "50%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(36,36,37,0.7)",
-                backdropFilter: "blur(8px)",
-                WebkitBackdropFilter: "blur(8px)",
-                border: "1px solid var(--line)",
-                color: "var(--text-dim)"
-            }}
-        >
-            <SettingsIcon size={19} />
-        </button>}
-
         <div
             key={screen}
             className="screen-fade app-scroll"
             style={{
                 flex: 1,
                 overflowY: "auto",
-                paddingBottom:
-                    "calc(var(--nav-height) + env(safe-area-inset-bottom))"
+                paddingBottom: showTabs
+                    ? "calc(var(--nav-height) + env(safe-area-inset-bottom))"
+                    : "env(safe-area-inset-bottom)"
             }}
         >
             {screen == "home" && <HomeScreen />}
@@ -72,10 +53,9 @@ function App() {
             {screen == "stats" && <StatsScreen />}
         </div>
 
-        {screen != "settings" && screen != "stats" && <NavBar />}
+        {showTabs && <NavBar />}
 
-        {screen != "settings" && screen != "stats" && splashDone
-            && <UpdateBanner />}
+        {showUpdateBanner && <UpdateBanner />}
 
         {!splashDone && <Splash onDone={() => setSplashDone(true)} />}
     </div>;

@@ -71,14 +71,17 @@ function HomeScreen() {
 
     const games = useAppStore(state => state.searchResults);
     const storedUsername = useAppStore(state => state.searchUsername);
+    const searchSource = useAppStore(state => state.searchSource);
+    const source = useAppStore(state => state.importSource) as Source;
+    const setSource = useAppStore(state => state.setImportSource);
+    const pgn = useAppStore(state => state.pgnDraft);
+    const setPgn = useAppStore(state => state.setPgnDraft);
     const setSearchResults = useAppStore(state => state.setSearchResults);
 
-    const [source, setSource] = useState<Source>(
-        games.length > 0 ? "chesscom" : "pgn"
-    );
-    const [pgn, setPgn] = useState("");
     const [username, setUsername] = useState(
-        storedUsername || loadSavedUsername("chesscom")
+        source == searchSource && storedUsername
+            ? storedUsername
+            : source == "pgn" ? "" : loadSavedUsername(source)
     );
 
     const now = new Date();
@@ -140,7 +143,7 @@ function HomeScreen() {
         setError("");
         setLoading(true);
         setVisibleCount(PAGE);
-        setSearchResults([], username.trim());
+        setSearchResults([], username.trim(), source);
 
         try {
             const fetched = source == "chesscom"
@@ -151,7 +154,7 @@ function HomeScreen() {
                     ? await getRecentLichessGames(username.trim())
                     : await getLichessGames(username.trim(), month, year);
 
-            setSearchResults(fetched, username.trim());
+            setSearchResults(fetched, username.trim(), source);
 
             if (source == "chesscom" || source == "lichess") {
                 saveUsername(source, username.trim());
@@ -213,10 +216,13 @@ function HomeScreen() {
                         setSource(item.id);
                         setError("");
                         setVisibleCount(PAGE);
-                        setSearchResults([], username.trim());
 
                         if (item.id == "chesscom" || item.id == "lichess") {
-                            setUsername(loadSavedUsername(item.id));
+                            setUsername(
+                                item.id == searchSource && storedUsername
+                                    ? storedUsername
+                                    : loadSavedUsername(item.id)
+                            );
                         }
                     }}
                     style={{
@@ -242,7 +248,9 @@ function HomeScreen() {
                 value={pgn}
                 onChange={event => setPgn(event.target.value)}
                 placeholder={"Paste a PGN here…\n\n1. e4 e5 2. Nf3 Nc6 …"}
+                spellCheck={false}
                 style={{
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                     width: "100%",
                     height: 170,
                     background: "var(--surface-2)",
@@ -322,6 +330,9 @@ function HomeScreen() {
                         if (event.key == "Enter") void fetchGames();
                     }}
                     placeholder="e.g. Hikaru"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     style={{
                         flex: 1,
                         background: "transparent",
